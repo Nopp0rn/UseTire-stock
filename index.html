@@ -2,6 +2,9 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>ระบบบันทึกยางเก่า ดี/เสีย - COCKPIT</title>
 <script>
@@ -42,8 +45,9 @@
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   body{margin:0; font-family:'Sarabun',sans-serif; background:var(--bg); color:var(--ink); font-size:15px;}
-  .app{max-width:760px; margin:0 auto; padding-bottom:84px;}
-  header{background:linear-gradient(135deg,var(--red),var(--red-dark)); color:#fff; padding:16px 18px; position:sticky; top:0; z-index:30;}
+  .app{max-width:760px; margin:0 auto;}
+  .topbar{position:sticky; top:0; z-index:30; box-shadow:0 2px 6px rgba(0,0,0,.08);}
+  header{background:linear-gradient(135deg,var(--red),var(--red-dark)); color:#fff; padding:16px 18px;}
   header h1{margin:0; font-size:18px; font-weight:700; letter-spacing:.3px;}
   header .sub{font-size:12px; opacity:.9; margin-top:2px;}
   .wrap{padding:14px;}
@@ -61,7 +65,7 @@
   .btn.green{background:var(--good);}
   .btn.outline{background:#fff; color:var(--ink); border:1px solid var(--line);}
   .btn.danger{background:var(--bad);}
-  .navbar{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); display:flex; max-width:760px; margin:0 auto; z-index:40;}
+  .navbar{background:#fff; border-bottom:1px solid var(--line); display:flex; max-width:760px; margin:0 auto;}
   .navbar button{flex:1; background:none; border:none; padding:8px 2px 7px; font-family:inherit; font-size:10px; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; white-space:nowrap;}
   .navbar button.active{color:var(--red); font-weight:700;}
   .navbar .ic{font-size:17px;}
@@ -1400,6 +1404,16 @@ function App(){
 
   useEffect(()=>{ reload(); reloadDeposits(); }, [reload, reloadDeposits]);
 
+  // 🔄 Realtime sync — อัปเดตอัตโนมัติเมื่อมีการเปลี่ยนแปลงข้อมูล จากเครื่อง/สาขาอื่น
+  useEffect(()=>{
+    if (!supa) return;
+    const channel = supa.channel("tire-track-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tire_lots" }, () => { reload(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tire_deposits" }, () => { reloadDeposits(); })
+      .subscribe();
+    return () => { supa.removeChannel(channel); };
+  }, [reload, reloadDeposits]);
+
   const tabs = [
     { k:"work",     ic:"📝", l:"บันทึก" },
     { k:"deposit",  ic:"🅿️", l:"ฝากยาง" },
@@ -1410,10 +1424,19 @@ function App(){
 
   return (
     <div className="app">
-      <header>
-        <h1>🛞 ระบบบันทึกยางเก่า ดี/เสีย</h1>
-        <div className="sub">COCKPIT · จัดการสต็อกยางเก่า 10 สาขา</div>
-      </header>
+      <div className="topbar">
+        <header>
+          <h1>🛞 ระบบบันทึกยางเก่า ดี/เสีย</h1>
+          <div className="sub">COCKPIT · จัดการสต็อกยางเก่า 10 สาขา</div>
+        </header>
+        <nav className="navbar">
+          {tabs.map(t=>(
+            <button key={t.k} className={tab===t.k?"active":""} onClick={()=>setTab(t.k)}>
+              <span className="ic">{t.ic}</span><span>{t.l}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
 
       {!supa && (
         <div className="banner">
@@ -1434,14 +1457,6 @@ function App(){
           </>
         )
       }
-
-      <nav className="navbar">
-        {tabs.map(t=>(
-          <button key={t.k} className={tab===t.k?"active":""} onClick={()=>setTab(t.k)}>
-            <span className="ic">{t.ic}</span><span>{t.l}</span>
-          </button>
-        ))}
-      </nav>
 
       {toastNode}
     </div>
