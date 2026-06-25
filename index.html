@@ -722,11 +722,11 @@ function WorkScreen({ lots, reload, toast }){
 /* ============================================================
    DASHBOARD
    ============================================================ */
-function Dashboard({ lots }){
+function Dashboard({ lots, deposits }){
   const months = useMemo(()=>{
-    const s = new Set(lots.map(l=>l.month_key));
+    const s = new Set([...lots.map(l=>l.month_key), ...deposits.map(d=>d.month_key)]);
     return Array.from(s).sort().reverse();
-  }, [lots]);
+  }, [lots, deposits]);
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
 
@@ -734,6 +734,9 @@ function Dashboard({ lots }){
 
   const filtered = lots.filter(l =>
     (!branch || l.branch===branch) && (!month || l.month_key===month)
+  );
+  const filteredDeposits = deposits.filter(d =>
+    (!branch || d.branch===branch) && (!month || d.month_key===month)
   );
 
   const agg = useMemo(()=>{
@@ -750,6 +753,15 @@ function Dashboard({ lots }){
     total = waitingSort + goodRemain + badRemain;
     return { total, waitingSort, goodRemain, badRemain, soldGood, soldBad, back, rejected };
   }, [filtered]);
+
+  const depositAgg = useMemo(()=>{
+    let totalQty=0, pendingQty=0;
+    filteredDeposits.forEach(d=>{
+      totalQty += n(d.qty);
+      if (d.status === "deposited") pendingQty += n(d.qty);
+    });
+    return { totalQty, pendingQty };
+  }, [filteredDeposits]);
 
   const Box = ({v,l,c}) => (
     <div className="stat" style={{background:c}}>
@@ -787,6 +799,14 @@ function Dashboard({ lots }){
           <Box v={agg.soldBad}    l="ขายผู้รับเหมายางเสียแล้ว" c="var(--purple)" />
           <Box v={agg.back}       l="ลูกค้านำกลับ" c="var(--amber)" />
           <Box v={agg.rejected}   l="ผู้รับเหมายางดีปฏิเสธ" c="#be123c" />
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>🅿️ ยอดฝากยาง</h2>
+        <div className="stat-grid">
+          <Box v={depositAgg.totalQty}   l="ยอดฝากยางรวม (เส้น)" c="#0891b2" />
+          <Box v={depositAgg.pendingQty} l="ยังฝากอยู่ (รอมารับ)" c="#f59e0b" />
         </div>
       </div>
     </div>
@@ -1227,15 +1247,48 @@ function PickupStage({ deposits, reload, toast }){
   );
 }
 
-function DepositList({ deposits }){
+function DepositList({ deposits, reload, toast }){
   const [branch, setBranch] = useState("");
   const [status, setStatus] = useState("");
   const [lightbox, setLightbox] = useState(null);
 
   const filtered = deposits.filter(d => (!branch || d.branch===branch) && (!status || d.status===status));
 
+  const monthSummary = useMemo(()=>{
+    const map = {};
+    deposits.forEach(d=>{ map[d.month_key]=(map[d.month_key]||0)+1; });
+    return Object.entries(map).sort((a,b)=> a[0]<b[0]?1:-1);
+  }, [deposits]);
+
+  const deleteMonth = async (mk, count) => {
+    if (!supa) return;
+    if (!confirm(`ลบข้อมูลการฝากยางทั้งหมดของ ${monthThai(mk)} จำนวน ${count} รายการ?\n(ลบรูปถ่ายในเดือนนี้ด้วย — กู้คืนไม่ได้)`)) return;
+    try {
+      const recs = deposits.filter(d=>d.month_key===mk);
+      const paths = recs.flatMap(d => [...(d.deposit_photos||[]), ...(d.pickup_photos||[])].map(p=>p.path)).filter(Boolean);
+      if (paths.length) await supa.storage.from(BUCKET).remove(paths);
+      const { error } = await supa.from(DEPOSIT_TABLE).delete().eq("month_key", mk);
+      if (error) throw error;
+      toast("ลบข้อมูลฝากยางเดือน "+monthThai(mk)+" แล้ว");
+      reload && reload();
+    } catch(err){ console.error(err); toast("ลบไม่สำเร็จ: "+(err.message||"")); }
+  };
+
   return (
     <div>
+      <div className="card">
+        <h2>🗂️ จัดการข้อมูลฝากยางรายเดือน</h2>
+        {monthSummary.length===0
+          ? <div className="empty">ยังไม่มีข้อมูล</div>
+          : monthSummary.map(([mk,c])=>(
+            <div className="monthrow" key={mk}>
+              <div><b>{monthThai(mk)}</b> <span className="badge">{c} รายการ</span></div>
+              <button className="btn danger" style={{width:"auto", padding:"8px 16px"}} onClick={()=>deleteMonth(mk,c)}>🗑 ลบ</button>
+            </div>
+          ))
+        }
+      </div>
+
       <div className="card" style={{paddingBottom:6}}>
         <div className="filterbar">
           <select value={branch} onChange={e=>setBranch(e.target.value)}>
@@ -1317,7 +1370,7 @@ function DepositScreen({ deposits, reload, toast }){
       </div>
       {stage==="new"    && <DepositForm onSaved={reload} toast={toast} />}
       {stage==="pickup" && <PickupStage deposits={deposits} reload={reload} toast={toast} />}
-      {stage==="all"    && <DepositList deposits={deposits} />}
+      {stage==="all"    && <DepositList deposits={deposits} reload={reload} toast={toast} />}
     </div>
   );
 }
@@ -1375,7 +1428,7 @@ function App(){
           <>
             {tab==="work"    && <WorkScreen lots={lots} reload={reload} toast={toast} />}
             {tab==="deposit" && <DepositScreen deposits={deposits} reload={reloadDeposits} toast={toast} />}
-            {tab==="dash"    && <Dashboard lots={lots} />}
+            {tab==="dash"    && <Dashboard lots={lots} deposits={deposits} />}
             {tab==="list"    && <RecordsList lots={lots} reload={reload} toast={toast} />}
             {tab==="admin"   && <Admin lots={lots} toast={toast} />}
           </>
