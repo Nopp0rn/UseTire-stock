@@ -62,9 +62,9 @@
   .btn.outline{background:#fff; color:var(--ink); border:1px solid var(--line);}
   .btn.danger{background:var(--bad);}
   .navbar{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); display:flex; max-width:760px; margin:0 auto; z-index:40;}
-  .navbar button{flex:1; background:none; border:none; padding:9px 4px 8px; font-family:inherit; font-size:11px; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px;}
+  .navbar button{flex:1; background:none; border:none; padding:8px 2px 7px; font-family:inherit; font-size:10px; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; white-space:nowrap;}
   .navbar button.active{color:var(--red); font-weight:700;}
-  .navbar .ic{font-size:19px;}
+  .navbar .ic{font-size:17px;}
   .stat-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
   .stat{border-radius:13px; padding:14px; color:#fff;}
   .stat .v{font-size:26px; font-weight:700; line-height:1;}
@@ -305,7 +305,7 @@ function IntakeForm({ onSaved, toast, defaultBranch }){
         <label>ถ่ายรูปยางที่รับเข้า (สูงสุด 4 รูป)</label>
         <label className="photo-input">
           📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
-          <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
+          <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={onPickFiles} />
         </label>
         {files.length>0 && (
           <div className="thumbs">
@@ -330,13 +330,20 @@ function IntakeForm({ onSaved, toast, defaultBranch }){
 }
 
 /* ============================================================
-   ขั้น 2: แยกเข้าฝั่งยางดี หรือ ยางเสีย (ทั้งชุด)
+   ขั้น 2: แยกเข้าฝั่งยางดี / ยางเสีย (แยกบางส่วนได้ เช่น ดี 2 เสีย 2)
    ============================================================ */
-function SortStage({ lots, reload, toast }){
-  const [busyId, setBusyId] = useState(null);
+function SortCard({ lot, reload, toast }){
+  const [busy, setBusy] = useState(false);
+  const [splitMode, setSplitMode] = useState(false);
+  const [goodQty, setGoodQty] = useState("");
+  const [badQty, setBadQty] = useState("");
 
-  const decide = async (lot, side) => {
-    setBusyId(lot.id);
+  const sum = n(goodQty) + n(badQty);
+  const validSplit = sum === lot.qty_received && (n(goodQty) > 0 || n(badQty) > 0);
+
+  // ไปทางเดียวทั้งหมด (ทางลัด)
+  const decideAll = async (side) => {
+    setBusy(true);
     try {
       const { error } = await supa.from(TABLE).update({
         side,
@@ -344,32 +351,102 @@ function SortStage({ lots, reload, toast }){
         sorted_at: new Date().toISOString()
       }).eq("id", lot.id);
       if (error) throw error;
-      toast(side === "good" ? "เข้าฝั่งยางดี ✓" : "เข้าฝั่งยางเสีย ✓");
+      toast(side === "good" ? "เข้าฝั่งยางดีทั้งหมด ✓" : "เข้าฝั่งยางเสียทั้งหมด ✓");
       reload();
     } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
-    finally { setBusyId(null); }
+    finally { setBusy(false); }
   };
 
-  if (!lots.length) return <div className="empty">ไม่มีรายการรอแยกดี/เสีย 🎉</div>;
+  // แยกบางส่วน เช่น ดี 2 เสีย 2
+  const confirmSplit = async () => {
+    if (!validSplit) { toast(`จำนวนรวมต้องเท่ากับ ${lot.qty_received} เส้น`); return; }
+    setBusy(true);
+    try {
+      const gq = n(goodQty), bq = n(badQty);
+      if (gq > 0 && bq > 0){
+        // แยกจริง: อัปเดตชุดเดิมเป็นฝั่งดี + สร้างชุดใหม่ฝั่งเสีย
+        const { error: e1 } = await supa.from(TABLE).update({
+          side: "good", status: "good_pending", qty_received: gq,
+          sorted_at: new Date().toISOString()
+        }).eq("id", lot.id);
+        if (e1) throw e1;
+        const { error: e2 } = await supa.from(TABLE).insert([{
+          record_date: lot.record_date,
+          month_key: lot.month_key,
+          branch: lot.branch,
+          tire_size: lot.tire_size,
+          brand: lot.brand,
+          qty_total_intake: bq,
+          qty_customer_back: 0,
+          qty_received: bq,
+          side: "bad",
+          status: "bad_pending",
+          parent_lot_id: lot.id,
+          sorted_at: new Date().toISOString()
+        }]);
+        if (e2) throw e2;
+      } else if (gq > 0){
+        await decideAll("good"); return;
+      } else {
+        await decideAll("bad"); return;
+      }
+      toast(`แยกแล้ว ✓ — ดี ${fmt(gq)} เส้น · เสีย ${fmt(bq)} เส้น`);
+      reload();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setBusy(false); }
+  };
 
   return (
-    <div>
-      {lots.map(lot=>(
-        <div className="lotcard" key={lot.id}>
-          <div className="top">
-            <div>
-              <div className="size">{lot.tire_size} <span className="small">{lot.brand}</span></div>
-              <div className="meta">สาขา {lot.branch} · {lot.record_date}</div>
-            </div>
-            <span className="status-badge sb-received">รอแยก</span>
-          </div>
-          <div className="qty">{fmt(lot.qty_received)} เส้น</div>
-          <div className="actions">
-            <button className="btn-good" disabled={busyId===lot.id} onClick={()=>decide(lot,"good")}>✅ เข้าฝั่งยางดี</button>
-            <button className="btn-bad" disabled={busyId===lot.id} onClick={()=>decide(lot,"bad")}>❌ เข้าฝั่งยางเสีย</button>
-          </div>
+    <div className="lotcard">
+      <div className="top">
+        <div>
+          <div className="size">{lot.tire_size} <span className="small">{lot.brand}</span></div>
+          <div className="meta">สาขา {lot.branch} · {lot.record_date}</div>
         </div>
-      ))}
+        <span className="status-badge sb-received">รอแยก</span>
+      </div>
+      <div className="qty">{fmt(lot.qty_received)} เส้น</div>
+
+      {!splitMode ? (
+        <>
+          <div className="actions">
+            <button className="btn-good" disabled={busy} onClick={()=>decideAll("good")}>✅ เข้าฝั่งยางดีทั้งหมด</button>
+            <button className="btn-bad" disabled={busy} onClick={()=>decideAll("bad")}>❌ เข้าฝั่งยางเสียทั้งหมด</button>
+          </div>
+          <button className="linkbtn" style={{width:"100%", marginTop:4}} onClick={()=>setSplitMode(true)}>
+            ✂️ แยกบางส่วน (เช่น ดี 2 เสีย 2)
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="grid2" style={{marginTop:10}}>
+            <div>
+              <label>จำนวนเข้าฝั่งดี</label>
+              <input type="number" inputMode="numeric" min="0" placeholder="0" value={goodQty} onChange={e=>setGoodQty(e.target.value)} />
+            </div>
+            <div>
+              <label>จำนวนเข้าฝั่งเสีย</label>
+              <input type="number" inputMode="numeric" min="0" placeholder="0" value={badQty} onChange={e=>setBadQty(e.target.value)} />
+            </div>
+          </div>
+          {sum !== lot.qty_received && (
+            <div className="note">⚠️ รวมกันต้องเท่ากับ {fmt(lot.qty_received)} เส้น (ขณะนี้ {fmt(sum)})</div>
+          )}
+          <div className="grid2" style={{marginTop:12}}>
+            <button className="btn outline" disabled={busy} onClick={()=>{ setSplitMode(false); setGoodQty(""); setBadQty(""); }}>ยกเลิก</button>
+            <button className="btn" disabled={busy || !validSplit} onClick={confirmSplit}>{busy?"กำลังบันทึก...":"ยืนยันแยก"}</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SortStage({ lots, reload, toast }){
+  if (!lots.length) return <div className="empty">ไม่มีรายการรอแยกดี/เสีย 🎉</div>;
+  return (
+    <div>
+      {lots.map(lot=> <SortCard key={lot.id} lot={lot} reload={reload} toast={toast} />)}
     </div>
   );
 }
@@ -486,7 +563,7 @@ function GoodDecisionModal({ lot, onClose, onDone, toast }){
             <label>รูปถ่ายยางที่ถูกปฏิเสธ (สูงสุด 4 รูป) <span className="req">*</span></label>
             <label className="photo-input">
               📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
-              <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
+              <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={onPickFiles} />
             </label>
             {files.length>0 && (
               <div className="thumbs">
@@ -937,9 +1014,318 @@ function Admin({ lots, toast }){
 /* ============================================================
    APP
    ============================================================ */
+/* ============================================================
+   ฝากยาง: รับฝาก / รอรับคืน / ดูทั้งหมด
+   ============================================================ */
+const THAI_PROVINCES = ["กรุงเทพมหานคร","กระบี่","กาญจนบุรี","กาฬสินธุ์","กำแพงเพชร","ขอนแก่น","จันทบุรี","ฉะเชิงเทรา","ชลบุรี","ชัยนาท","ชัยภูมิ","ชุมพร","เชียงราย","เชียงใหม่","ตรัง","ตราด","ตาก","นครนายก","นครปฐม","นครพนม","นครราชสีมา","นครศรีธรรมราช","นครสวรรค์","นนทบุรี","นราธิวาส","น่าน","บึงกาฬ","บุรีรัมย์","ปทุมธานี","ประจวบคีรีขันธ์","ปราจีนบุรี","ปัตตานี","พระนครศรีอยุธยา","พังงา","พัทลุง","พิจิตร","พิษณุโลก","เพชรบุรี","เพชรบูรณ์","แพร่","ภูเก็ต","มหาสารคาม","มุกดาหาร","แม่ฮ่องสอน","ยโสธร","ยะลา","ร้อยเอ็ด","ระนอง","ระยอง","ราชบุรี","ลพบุรี","ลำปาง","ลำพูน","เลย","ศรีสะเกษ","สกลนคร","สงขลา","สตูล","สมุทรปราการ","สมุทรสงคราม","สมุทรสาคร","สระแก้ว","สระบุรี","สิงห์บุรี","สุโขทัย","สุพรรณบุรี","สุราษฎร์ธานี","สุรินทร์","หนองคาย","หนองบัวลำภู","อ่างทอง","อำนาจเจริญ","อุดรธานี","อุตรดิตถ์","อุทัยธานี","อุบลราชธานี"];
+
+const DEPOSIT_TABLE = "tire_deposits";
+
+function DepositForm({ onSaved, toast, defaultBranch }){
+  const blank = {
+    branch: defaultBranch || "", deposit_date: todayStr(),
+    customer_name:"", phone:"", plate_number:"", plate_province:"", qty:"", note:""
+  };
+  const [f, setF] = useState(blank);
+  const [files, setFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const set = (k,v) => setF(p => ({...p, [k]:v}));
+  const onPickFiles = (e) => setFiles(Array.from(e.target.files || []).slice(0,4));
+
+  const submit = async () => {
+    if (!supa) { toast("ยังไม่ได้ตั้งค่า Supabase"); return; }
+    if (!f.branch) { toast("กรุณาเลือกสาขา"); return; }
+    if (!f.customer_name.trim()) { toast("กรุณากรอกชื่อลูกค้า"); return; }
+    if (!f.plate_number.trim()) { toast("กรุณากรอกทะเบียนรถ"); return; }
+    if (!f.plate_province.trim()) { toast("กรุณากรอกจังหวัด"); return; }
+    if (n(f.qty) <= 0) { toast("กรุณากรอกจำนวนเส้นที่ฝาก"); return; }
+    if (files.length === 0) { toast("กรุณาถ่ายรูปยางที่รับฝาก"); return; }
+    setSaving(true);
+    try {
+      let photos = [];
+      for (const file of files){
+        const blob = await compressImage(file);
+        const path = `deposits/${f.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+        if (error) throw error;
+        const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+        photos.push({ url: data.publicUrl, path });
+      }
+      const row = {
+        branch: f.branch,
+        deposit_date: f.deposit_date,
+        month_key: monthKeyOf(f.deposit_date),
+        customer_name: f.customer_name.trim(),
+        phone: f.phone.trim(),
+        plate_number: f.plate_number.trim(),
+        plate_province: f.plate_province.trim(),
+        qty: n(f.qty),
+        deposit_photos: photos,
+        status: "deposited",
+        note: f.note.trim()
+      };
+      const { error } = await supa.from(DEPOSIT_TABLE).insert([row]);
+      if (error) throw error;
+      toast("บันทึกการฝากยางสำเร็จ ✓");
+      setF({ ...blank, branch: f.branch, deposit_date: todayStr() });
+      setFiles([]);
+      onSaved && onSaved();
+    } catch(err){
+      console.error(err);
+      toast("ผิดพลาด: " + (err.message || "บันทึกไม่สำเร็จ"));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="card">
+      <h2>🅿️ รับฝากยาง</h2>
+
+      <label>สาขา <span className="req">*</span></label>
+      <select value={f.branch} onChange={e=>set("branch",e.target.value)}>
+        <option value="">— เลือกสาขา —</option>
+        {BRANCHES.map(b => <option key={b} value={b}>สาขา {b}</option>)}
+      </select>
+
+      <label>วันที่ฝาก (อัตโนมัติ)</label>
+      <input type="date" value={f.deposit_date} onChange={e=>set("deposit_date",e.target.value)} />
+
+      <label>ชื่อลูกค้า <span className="req">*</span></label>
+      <input placeholder="ชื่อ-นามสกุล" value={f.customer_name} onChange={e=>set("customer_name",e.target.value)} />
+
+      <label>เบอร์โทร</label>
+      <input type="tel" inputMode="numeric" placeholder="08xxxxxxxx" value={f.phone} onChange={e=>set("phone",e.target.value)} />
+
+      <div className="grid2">
+        <div>
+          <label>ทะเบียนรถ <span className="req">*</span></label>
+          <input placeholder="เช่น กข 1234" value={f.plate_number} onChange={e=>set("plate_number",e.target.value)} />
+        </div>
+        <div>
+          <label>จังหวัด <span className="req">*</span></label>
+          <input list="provinces-list" placeholder="เช่น กรุงเทพมหานคร" value={f.plate_province} onChange={e=>set("plate_province",e.target.value)} />
+          <datalist id="provinces-list">
+            {THAI_PROVINCES.map(p=><option key={p} value={p} />)}
+          </datalist>
+        </div>
+      </div>
+
+      <label>จำนวนเส้นที่ฝาก <span className="req">*</span></label>
+      <input type="number" inputMode="numeric" min="0" value={f.qty} onChange={e=>set("qty",e.target.value)} />
+
+      <label>หมายเหตุ (ถ้ามี)</label>
+      <textarea placeholder="เช่น ฝากไว้รอเปลี่ยนใหม่, รอตัดสินใจ..." value={f.note} onChange={e=>set("note",e.target.value)} />
+
+      <label>ถ่ายรูปยางที่รับฝาก (สูงสุด 4 รูป) <span className="req">*</span></label>
+      <label className="photo-input">
+        📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
+        <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={onPickFiles} />
+      </label>
+      {files.length>0 && (
+        <div className="thumbs">
+          {files.map((file,i)=>(<img key={i} src={URL.createObjectURL(file)} alt="" />))}
+        </div>
+      )}
+
+      <div style={{marginTop:16}}>
+        <button className="btn" disabled={saving} onClick={submit}>
+          {saving ? "กำลังบันทึก..." : "บันทึกการฝาก"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PickupModal({ deposit, onClose, onDone, toast }){
+  const [pickupDate, setPickupDate] = useState(todayStr());
+  const [files, setFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const onPickFiles = (e) => setFiles(Array.from(e.target.files || []).slice(0,4));
+
+  const submit = async () => {
+    if (files.length === 0) { toast("กรุณาถ่ายรูปตอนมารับ"); return; }
+    setSaving(true);
+    try {
+      let photos = [];
+      for (const file of files){
+        const blob = await compressImage(file);
+        const path = `deposits/${deposit.branch}/pickup_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+        if (error) throw error;
+        const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+        photos.push({ url: data.publicUrl, path });
+      }
+      const { error } = await supa.from(DEPOSIT_TABLE).update({
+        status: "picked_up",
+        pickup_date: pickupDate,
+        pickup_photos: photos
+      }).eq("id", deposit.id);
+      if (error) throw error;
+      toast("บันทึกการรับคืนแล้ว ✓");
+      onDone();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-sheet" onClick={e=>e.stopPropagation()}>
+        <h3>{deposit.customer_name}</h3>
+        <div className="small">
+          {deposit.plate_number} · {deposit.plate_province} · ฝาก {fmt(deposit.qty)} เส้น เมื่อ {deposit.deposit_date}
+        </div>
+
+        <label>วันที่มารับ</label>
+        <input type="date" value={pickupDate} onChange={e=>setPickupDate(e.target.value)} />
+
+        <label>ถ่ายรูปตอนมารับออกจากสาขา (สูงสุด 4 รูป) <span className="req">*</span></label>
+        <label className="photo-input">
+          📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
+          <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={onPickFiles} />
+        </label>
+        {files.length>0 && (
+          <div className="thumbs">
+            {files.map((file,i)=>(<img key={i} src={URL.createObjectURL(file)} alt="" />))}
+          </div>
+        )}
+
+        <div className="grid2" style={{marginTop:16}}>
+          <button className="btn outline" onClick={onClose}>ยกเลิก</button>
+          <button className="btn" disabled={saving} onClick={submit}>{saving?"กำลังบันทึก...":"ยืนยันรับคืนแล้ว"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PickupStage({ deposits, reload, toast }){
+  const [active, setActive] = useState(null);
+  const pending = deposits.filter(d=>d.status==="deposited");
+  if (!pending.length) return <div className="empty">ไม่มียางฝากที่รอรับคืน 🎉</div>;
+  return (
+    <div>
+      {pending.map(d=>(
+        <div className="lotcard" key={d.id} onClick={()=>setActive(d)} style={{cursor:"pointer"}}>
+          <div className="top">
+            <div>
+              <div className="size">{d.customer_name}</div>
+              <div className="meta">{d.plate_number} · {d.plate_province} · สาขา {d.branch}</div>
+              <div className="meta">ฝากเมื่อ {d.deposit_date}{d.phone ? " · โทร "+d.phone : ""}</div>
+            </div>
+            <span className="status-badge sb-bad_pending">ฝากอยู่</span>
+          </div>
+          <div className="qty">{fmt(d.qty)} เส้น</div>
+          {(d.deposit_photos||[]).length>0 && (
+            <div className="thumbs">{d.deposit_photos.map((p,i)=>(<img key={i} src={p.url} alt="" />))}</div>
+          )}
+          <div className="small" style={{marginTop:8}}>แตะเพื่อบันทึกตอนมารับ →</div>
+        </div>
+      ))}
+      {active && (
+        <PickupModal deposit={active} toast={toast} onClose={()=>setActive(null)} onDone={()=>{ setActive(null); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+function DepositList({ deposits }){
+  const [branch, setBranch] = useState("");
+  const [status, setStatus] = useState("");
+  const [lightbox, setLightbox] = useState(null);
+
+  const filtered = deposits.filter(d => (!branch || d.branch===branch) && (!status || d.status===status));
+
+  return (
+    <div>
+      <div className="card" style={{paddingBottom:6}}>
+        <div className="filterbar">
+          <select value={branch} onChange={e=>setBranch(e.target.value)}>
+            <option value="">ทุกสาขา</option>
+            {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+          </select>
+          <select value={status} onChange={e=>setStatus(e.target.value)}>
+            <option value="">ทุกสถานะ</option>
+            <option value="deposited">ฝากอยู่</option>
+            <option value="picked_up">รับคืนแล้ว</option>
+          </select>
+        </div>
+      </div>
+
+      {filtered.length===0
+        ? <div className="empty">ไม่พบรายการ</div>
+        : filtered.map(d=>(
+          <div className="rec" key={d.id}>
+            <div className="top">
+              <div>
+                <div className="size">{d.customer_name}</div>
+                <div className="meta">{d.plate_number} · {d.plate_province} · สาขา {d.branch}</div>
+              </div>
+              <span className={"status-badge "+(d.status==="deposited"?"sb-bad_pending":"sb-good_done")}>
+                {d.status==="deposited" ? "ฝากอยู่" : "รับคืนแล้ว"}
+              </span>
+            </div>
+            <table>
+              <tbody>
+                <tr><td>จำนวนที่ฝาก</td><td>{fmt(d.qty)} เส้น</td></tr>
+                <tr><td>วันที่ฝาก</td><td>{d.deposit_date}</td></tr>
+                {d.phone && <tr><td>เบอร์โทร</td><td>{d.phone}</td></tr>}
+                {d.status==="picked_up" && <tr><td>วันที่มารับ</td><td>{d.pickup_date}</td></tr>}
+              </tbody>
+            </table>
+            {d.note && <div className="note">หมายเหตุ: {d.note}</div>}
+            {(d.deposit_photos||[]).length>0 && (
+              <>
+                <div className="small" style={{marginTop:8}}>📷 รูปตอนฝาก</div>
+                <div className="thumbs">{d.deposit_photos.map((p,i)=>(<img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />))}</div>
+              </>
+            )}
+            {(d.pickup_photos||[]).length>0 && (
+              <>
+                <div className="small" style={{marginTop:8}}>📷 รูปตอนมารับ</div>
+                <div className="thumbs">{d.pickup_photos.map((p,i)=>(<img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />))}</div>
+              </>
+            )}
+          </div>
+        ))
+      }
+
+      {lightbox && (
+        <div className="lightbox" onClick={()=>setLightbox(null)}>
+          <div className="x">×</div>
+          <img src={lightbox} alt="" onClick={e=>e.stopPropagation()} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DepositScreen({ deposits, reload, toast }){
+  const [stage, setStage] = useState("new");
+  const pendingCount = deposits.filter(d=>d.status==="deposited").length;
+  const tabs = [
+    { k:"new",  l:"ฝากใหม่" },
+    { k:"pickup", l:"รอรับคืน", cnt: pendingCount },
+    { k:"all",  l:"ดูทั้งหมด" },
+  ];
+  return (
+    <div className="wrap">
+      <div className="seg">
+        {tabs.map(t=>(
+          <button key={t.k} className={stage===t.k?"active":""} onClick={()=>setStage(t.k)}>
+            {t.l}{typeof t.cnt==="number" && <span className="cnt">{t.cnt}</span>}
+          </button>
+        ))}
+      </div>
+      {stage==="new"    && <DepositForm onSaved={reload} toast={toast} />}
+      {stage==="pickup" && <PickupStage deposits={deposits} reload={reload} toast={toast} />}
+      {stage==="all"    && <DepositList deposits={deposits} />}
+    </div>
+  );
+}
+
 function App(){
   const [tab, setTab] = useState("work");
   const [lots, setLots] = useState([]);
+  const [deposits, setDeposits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, toastNode] = useToast();
 
@@ -952,13 +1338,21 @@ function App(){
     setLoading(false);
   }, [toast]);
 
-  useEffect(()=>{ reload(); }, [reload]);
+  const reloadDeposits = useCallback(async ()=>{
+    if (!supa) return;
+    const { data, error } = await supa.from(DEPOSIT_TABLE).select("*").order("deposit_date",{ascending:false}).order("created_at",{ascending:false});
+    if (error){ console.error(error); toast("โหลดข้อมูลฝากยางผิดพลาด"); }
+    setDeposits(data || []);
+  }, [toast]);
+
+  useEffect(()=>{ reload(); reloadDeposits(); }, [reload, reloadDeposits]);
 
   const tabs = [
-    { k:"work",  ic:"📝", l:"บันทึก" },
-    { k:"dash",  ic:"📊", l:"แดชบอร์ด" },
-    { k:"list",  ic:"📋", l:"รายการ" },
-    { k:"admin", ic:"⚙️", l:"แอดมิน" },
+    { k:"work",     ic:"📝", l:"บันทึก" },
+    { k:"deposit",  ic:"🅿️", l:"ฝากยาง" },
+    { k:"dash",     ic:"📊", l:"แดชบอร์ด" },
+    { k:"list",     ic:"📋", l:"รายการ" },
+    { k:"admin",    ic:"⚙️", l:"แอดมิน" },
   ];
 
   return (
@@ -979,10 +1373,11 @@ function App(){
         ? <div className="empty" style={{paddingTop:40}}>กำลังโหลด...</div>
         : (
           <>
-            {tab==="work"  && <WorkScreen lots={lots} reload={reload} toast={toast} />}
-            {tab==="dash"  && <Dashboard lots={lots} />}
-            {tab==="list"  && <RecordsList lots={lots} reload={reload} toast={toast} />}
-            {tab==="admin" && <Admin lots={lots} toast={toast} />}
+            {tab==="work"    && <WorkScreen lots={lots} reload={reload} toast={toast} />}
+            {tab==="deposit" && <DepositScreen deposits={deposits} reload={reloadDeposits} toast={toast} />}
+            {tab==="dash"    && <Dashboard lots={lots} />}
+            {tab==="list"    && <RecordsList lots={lots} reload={reload} toast={toast} />}
+            {tab==="admin"   && <Admin lots={lots} toast={toast} />}
           </>
         )
       }
