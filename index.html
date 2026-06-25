@@ -75,6 +75,35 @@
   .rec .size{font-weight:700; font-size:15px;}
   .rec .meta{font-size:12px; color:var(--muted); margin-top:2px;}
   .rec table{width:100%; border-collapse:collapse; margin-top:8px; font-size:12.5px;}
+  .seg{display:flex; gap:6px; overflow-x:auto; padding:2px 2px 10px; -webkit-overflow-scrolling:touch;}
+  .seg button{flex:0 0 auto; padding:9px 14px; border-radius:999px; border:1px solid var(--line); background:#fff; font-family:inherit; font-size:13px; font-weight:600; color:#6b7280; white-space:nowrap; cursor:pointer; position:relative;}
+  .seg button.active{background:var(--red); color:#fff; border-color:var(--red);}
+  .seg .cnt{display:inline-block; background:rgba(0,0,0,.15); color:inherit; border-radius:999px; font-size:11px; padding:1px 6px; margin-left:5px;}
+  .seg button.active .cnt{background:rgba(255,255,255,.3);}
+  .lotcard{border:1px solid var(--line); border-radius:13px; padding:13px; margin-bottom:10px; background:#fff;}
+  .lotcard .top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+  .lotcard .size{font-weight:700; font-size:15.5px;}
+  .lotcard .meta{font-size:12px; color:var(--muted); margin-top:2px;}
+  .lotcard .qty{font-size:22px; font-weight:700; margin-top:8px;}
+  .lotcard .actions{display:flex; gap:8px; margin-top:12px;}
+  .lotcard .actions button{flex:1; padding:11px; border-radius:10px; border:none; font-family:inherit; font-weight:700; font-size:14px; cursor:pointer;}
+  .btn-good{background:#ecfdf5; color:var(--good); border:1px solid #bbf7d0 !important;}
+  .btn-bad{background:#fef2f2; color:var(--bad); border:1px solid #fecaca !important;}
+  .status-badge{font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px;}
+  .sb-received{background:#e0e7ff; color:#3730a3;}
+  .sb-good_pending{background:#dcfce7; color:#166534;}
+  .sb-bad_pending{background:#fee2e2; color:#991b1b;}
+  .sb-good_done{background:#dbeafe; color:#1e40af;}
+  .sb-sold_bad{background:#f3e8ff; color:#6b21a8;}
+  .checkrow{display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:8px;}
+  .checkrow input[type=checkbox]{width:22px; height:22px; flex:0 0 auto;}
+  .checkrow .info{flex:1;}
+  .checkrow .info .size{font-weight:700; font-size:14.5px;}
+  .checkrow .info .meta{font-size:11.5px; color:var(--muted);}
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:80; display:flex; align-items:flex-end; justify-content:center;}
+  .modal-sheet{background:#fff; width:100%; max-width:760px; border-radius:18px 18px 0 0; padding:18px; max-height:88vh; overflow-y:auto;}
+  .modal-sheet h3{margin:0 0 12px; font-size:16px; font-weight:700;}
+  .linkbtn{background:none; border:none; color:var(--red); font-family:inherit; font-weight:700; font-size:14px; padding:8px; cursor:pointer;}
   .rec td{padding:3px 0;}
   .rec td:last-child{text-align:right; font-weight:600;}
   .thumbs{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
@@ -116,15 +145,15 @@
 const { useState, useEffect, useMemo, useCallback } = React;
 
 /* ============================================================
-   ⚙️ ตั้งค่า Supabase — ใส่ค่าของพี่นพพรตรงนี้
+   ⚙️ ตั้งค่า Supabase — TireTrack
    ============================================================ */
-const SUPABASE_URL = "https://yigveyqcfzkxjzsrlger.supabase.co";        // TireTrack
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpZ3ZleXFjZnpreGp6c3JsZ2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjYzMjUsImV4cCI6MjA5NDYwMjMyNX0.5fkhW2ITHwuF2KCLcbY9Eo2E6-eTnuk8B-vTVSMRXbQ";   // TireTrack anon
+const SUPABASE_URL = "https://yigveyqcfzkxjzsrlger.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpZ3ZleXFjZnpreGp6c3JsZ2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjYzMjUsImV4cCI6MjA5NDYwMjMyNX0.5fkhW2ITHwuF2KCLcbY9Eo2E6-eTnuk8B-vTVSMRXbQ";
 const BUCKET = "tire-photos";
+const TABLE = "tire_lots";
 /* ============================================================ */
 
 const BRANCHES = ["003","009","010","012","014","048","050","096","107","143"];
-const TABLE = "tire_records";
 
 const supa = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -145,11 +174,12 @@ const monthThai = (mk) => {
 const n = (v) => { const x = parseInt(v,10); return isNaN(x) ? 0 : x; };
 const fmt = (v) => (v||0).toLocaleString("th-TH");
 
-// สูตรคำนวณคงเหลือต่อรายการ (ยางดีถูกปฏิเสธ -> ย้ายเข้ายางเสียอัตโนมัติ)
-const calc = (r) => {
-  const goodRemain = n(r.qty_good) - n(r.qty_sold_good) - n(r.qty_rejected);
-  const badRemain  = n(r.qty_bad)  + n(r.qty_rejected)  - n(r.qty_sold_bad);
-  return { goodRemain, badRemain, totalRemain: goodRemain + badRemain };
+const STATUS_LABEL = {
+  received:"รับเข้าแล้ว รอแยกดี/เสีย",
+  good_pending:"รอผู้รับเหมายางดีคัด",
+  bad_pending:"รอผู้รับเหมายางเสียมารับ",
+  good_done:"ผู้รับเหมายางดีตัดสินครบแล้ว",
+  sold_bad:"ขายให้ผู้รับเหมายางเสียแล้ว"
 };
 
 function compressImage(file, maxDim = 1280, quality = 0.7) {
@@ -183,36 +213,34 @@ function useToast(){
 }
 
 /* ============================================================
-   FORM
+   ขั้น 1: รับเข้าสต็อกยางเก่า
    ============================================================ */
-function RecordForm({ onSaved, toast }){
+function IntakeForm({ onSaved, toast, defaultBranch }){
   const blank = {
-    branch:"", record_date: todayStr(), tire_size:"", brand:"",
-    qty_received:"", qty_good:"", qty_bad:"", qty_customer_back:"",
-    qty_sold_good:"", qty_sold_bad:"", qty_rejected:"", reject_note:""
+    branch: defaultBranch || "", record_date: todayStr(), tire_size:"", brand:"",
+    qty_total_intake:"", qty_customer_back:""
   };
   const [f, setF] = useState(blank);
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const set = (k,v) => setF(p => ({...p, [k]:v}));
-  const hasReject = n(f.qty_rejected) > 0;
+  const net = Math.max(0, n(f.qty_total_intake) - n(f.qty_customer_back));
 
-  const onPickFiles = (e) => {
-    const list = Array.from(e.target.files || []).slice(0,4);
-    setFiles(list);
-  };
+  const onPickFiles = (e) => setFiles(Array.from(e.target.files || []).slice(0,4));
 
   const submit = async () => {
     if (!supa) { toast("ยังไม่ได้ตั้งค่า Supabase"); return; }
     if (!f.branch) { toast("กรุณาเลือกสาขา"); return; }
     if (!f.tire_size.trim()) { toast("กรุณากรอกขนาดยาง"); return; }
+    if (n(f.qty_total_intake) <= 0) { toast("กรุณากรอกจำนวนที่รับเข้า"); return; }
+    if (net <= 0) { toast("จำนวนสุทธิต้องมากกว่า 0 (รับเข้า - ลูกค้านำกลับ)"); return; }
     setSaving(true);
     try {
       let photos = [];
-      if (hasReject && files.length){
+      if (files.length){
         for (const file of files){
           const blob = await compressImage(file);
-          const path = `${f.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+          const path = `${f.branch}/intake_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
           const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
           if (error) throw error;
           const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
@@ -225,19 +253,15 @@ function RecordForm({ onSaved, toast }){
         branch: f.branch,
         tire_size: f.tire_size.trim(),
         brand: f.brand.trim(),
-        qty_received: n(f.qty_received),
-        qty_good: n(f.qty_good),
-        qty_bad: n(f.qty_bad),
+        qty_total_intake: n(f.qty_total_intake),
         qty_customer_back: n(f.qty_customer_back),
-        qty_sold_good: n(f.qty_sold_good),
-        qty_sold_bad: n(f.qty_sold_bad),
-        qty_rejected: n(f.qty_rejected),
-        reject_note: f.reject_note.trim(),
-        reject_photos: photos
+        qty_received: net,
+        status: "received",
+        intake_photos: photos
       };
       const { error } = await supa.from(TABLE).insert([row]);
       if (error) throw error;
-      toast("บันทึกสำเร็จ ✓");
+      toast("บันทึกรับเข้าสำเร็จ ✓ — ไปแยกดี/เสียได้ที่แท็บถัดไป");
       setF({ ...blank, branch: f.branch, record_date: todayStr() });
       setFiles([]);
       onSaved && onSaved();
@@ -248,9 +272,9 @@ function RecordForm({ onSaved, toast }){
   };
 
   return (
-    <div className="wrap">
+    <div>
       <div className="card">
-        <h2>📝 บันทึกข้อมูลยางเก่า</h2>
+        <h2>📥 ขั้น 1: รับเข้าสต็อกยางเก่า</h2>
 
         <label>สาขา <span className="req">*</span></label>
         <select value={f.branch} onChange={e=>set("branch",e.target.value)}>
@@ -272,60 +296,32 @@ function RecordForm({ onSaved, toast }){
           </div>
         </div>
 
-        <label>จำนวนรับเข้าสต็อกยางเก่า</label>
-        <input type="number" inputMode="numeric" min="0" value={f.qty_received} onChange={e=>set("qty_received",e.target.value)} />
+        <label>จำนวนยางเก่าที่รับจากลูกค้า <span className="req">*</span></label>
+        <input type="number" inputMode="numeric" min="0" value={f.qty_total_intake} onChange={e=>set("qty_total_intake",e.target.value)} />
 
-        <div className="grid2">
-          <div>
-            <label>เข้าสต็อกยางดี</label>
-            <input type="number" inputMode="numeric" min="0" value={f.qty_good} onChange={e=>set("qty_good",e.target.value)} />
-          </div>
-          <div>
-            <label>เข้าสต็อกยางเสีย</label>
-            <input type="number" inputMode="numeric" min="0" value={f.qty_bad} onChange={e=>set("qty_bad",e.target.value)} />
-          </div>
-        </div>
-
-        <label>จำนวนที่ลูกค้านำกลับ</label>
+        <label>จำนวนที่ลูกค้านำกลับทันที (ถ้ามี)</label>
         <input type="number" inputMode="numeric" min="0" value={f.qty_customer_back} onChange={e=>set("qty_customer_back",e.target.value)} />
 
-        <div className="grid2">
-          <div>
-            <label>ผู้รับเหมายางดีซื้อออก</label>
-            <input type="number" inputMode="numeric" min="0" value={f.qty_sold_good} onChange={e=>set("qty_sold_good",e.target.value)} />
+        <label>ถ่ายรูปยางที่รับเข้า (สูงสุด 4 รูป)</label>
+        <label className="photo-input">
+          📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
+          <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
+        </label>
+        {files.length>0 && (
+          <div className="thumbs">
+            {files.map((file,i)=>(<img key={i} src={URL.createObjectURL(file)} alt="" />))}
           </div>
-          <div>
-            <label>ผู้รับเหมายางเสียซื้อออก</label>
-            <input type="number" inputMode="numeric" min="0" value={f.qty_sold_bad} onChange={e=>set("qty_sold_bad",e.target.value)} />
+        )}
+
+        {n(f.qty_total_intake) > 0 && (
+          <div className="note" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
+            จำนวนที่จะเข้าสู่สต็อกยางเก่าจริง = {fmt(net)} เส้น
           </div>
-        </div>
-
-        <label>จำนวนยางดีที่ถูกปฏิเสธ (ไม่ถูกซื้อ)</label>
-        <input type="number" inputMode="numeric" min="0" value={f.qty_rejected} onChange={e=>set("qty_rejected",e.target.value)} />
-
-        {hasReject && (
-          <>
-            <div className="note">⚠️ ยางดีที่ถูกปฏิเสธ {n(f.qty_rejected)} เส้น จะถูกย้ายเข้าสต็อก<b>ยางเสีย</b>อัตโนมัติ</div>
-            <label>หมายเหตุ เหตุผลที่ไม่รับซื้อ</label>
-            <textarea placeholder="เช่น ดอกยางต่างกัน, ยี่ห้อไม่ตรง, สภาพไม่ผ่านเกณฑ์..." value={f.reject_note} onChange={e=>set("reject_note",e.target.value)} />
-            <label>รูปถ่ายยางดีที่ไม่ถูกซื้อ (สูงสุด 4 รูป)</label>
-            <label className="photo-input">
-              📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
-              <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
-            </label>
-            {files.length>0 && (
-              <div className="thumbs">
-                {files.map((file,i)=>(
-                  <img key={i} src={URL.createObjectURL(file)} alt="" />
-                ))}
-              </div>
-            )}
-          </>
         )}
 
         <div style={{marginTop:16}}>
           <button className="btn" disabled={saving} onClick={submit}>
-            {saving ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+            {saving ? "กำลังบันทึก..." : "บันทึกรับเข้า"}
           </button>
         </div>
       </div>
@@ -334,32 +330,348 @@ function RecordForm({ onSaved, toast }){
 }
 
 /* ============================================================
+   ขั้น 2: แยกเข้าฝั่งยางดี หรือ ยางเสีย (ทั้งชุด)
+   ============================================================ */
+function SortStage({ lots, reload, toast }){
+  const [busyId, setBusyId] = useState(null);
+
+  const decide = async (lot, side) => {
+    setBusyId(lot.id);
+    try {
+      const { error } = await supa.from(TABLE).update({
+        side,
+        status: side === "good" ? "good_pending" : "bad_pending",
+        sorted_at: new Date().toISOString()
+      }).eq("id", lot.id);
+      if (error) throw error;
+      toast(side === "good" ? "เข้าฝั่งยางดี ✓" : "เข้าฝั่งยางเสีย ✓");
+      reload();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setBusyId(null); }
+  };
+
+  if (!lots.length) return <div className="empty">ไม่มีรายการรอแยกดี/เสีย 🎉</div>;
+
+  return (
+    <div>
+      {lots.map(lot=>(
+        <div className="lotcard" key={lot.id}>
+          <div className="top">
+            <div>
+              <div className="size">{lot.tire_size} <span className="small">{lot.brand}</span></div>
+              <div className="meta">สาขา {lot.branch} · {lot.record_date}</div>
+            </div>
+            <span className="status-badge sb-received">รอแยก</span>
+          </div>
+          <div className="qty">{fmt(lot.qty_received)} เส้น</div>
+          <div className="actions">
+            <button className="btn-good" disabled={busyId===lot.id} onClick={()=>decide(lot,"good")}>✅ เข้าฝั่งยางดี</button>
+            <button className="btn-bad" disabled={busyId===lot.id} onClick={()=>decide(lot,"bad")}>❌ เข้าฝั่งยางเสีย</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================
+   ขั้น 3: ผู้รับเหมายางดีคัด (รับ/ปฏิเสธ พร้อมรูปถ้าปฏิเสธ)
+   ============================================================ */
+function GoodDecisionModal({ lot, onClose, onDone, toast }){
+  const remaining = lot.qty_received - n(lot.qty_sold_good) - n(lot.qty_rejected);
+  const [accepted, setAccepted] = useState("");
+  const [rejected, setRejected] = useState("");
+  const [note, setNote] = useState("");
+  const [files, setFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  const acceptNow = n(accepted);
+  const rejectNow = n(rejected);
+  const sum = acceptNow + rejectNow;
+  const valid = sum > 0 && sum <= remaining;
+  const hasReject = rejectNow > 0;
+  const willRemain = remaining - sum;
+
+  const onPickFiles = (e) => setFiles(Array.from(e.target.files || []).slice(0,4));
+
+  const submit = async () => {
+    if (!valid) { toast(`กรอกจำนวนให้ถูกต้อง (ไม่เกิน ${remaining} เส้นที่เหลือ)`); return; }
+    if (hasReject && files.length === 0) { toast("กรุณาถ่ายรูปยางที่ถูกปฏิเสธ"); return; }
+    setSaving(true);
+    try {
+      let photos = [];
+      if (hasReject && files.length){
+        for (const file of files){
+          const blob = await compressImage(file);
+          const path = `${lot.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+          if (error) throw error;
+          const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+          photos.push({ url: data.publicUrl, path });
+        }
+      }
+      const newSoldGood = n(lot.qty_sold_good) + acceptNow;
+      const newRejected = n(lot.qty_rejected) + rejectNow;
+      const newRemaining = lot.qty_received - newSoldGood - newRejected;
+
+      const { error: e1 } = await supa.from(TABLE).update({
+        status: newRemaining <= 0 ? "good_done" : "good_pending",
+        qty_sold_good: newSoldGood,
+        qty_rejected: newRejected,
+        reject_note: hasReject ? note.trim() : lot.reject_note,
+        reject_photos: hasReject ? photos : (lot.reject_photos || []),
+        good_decided_at: new Date().toISOString()
+      }).eq("id", lot.id);
+      if (e1) throw e1;
+
+      if (hasReject){
+        const today = todayStr();
+        const { error: e2 } = await supa.from(TABLE).insert([{
+          record_date: today,
+          month_key: monthKeyOf(today),
+          branch: lot.branch,
+          tire_size: lot.tire_size,
+          brand: lot.brand,
+          qty_total_intake: rejectNow,
+          qty_customer_back: 0,
+          qty_received: rejectNow,
+          side: "bad",
+          status: "bad_pending",
+          reject_note: note.trim(),
+          reject_photos: photos,
+          parent_lot_id: lot.id,
+          sorted_at: new Date().toISOString()
+        }]);
+        if (e2) throw e2;
+      }
+      toast(newRemaining <= 0 ? "บันทึกผลครบแล้ว ✓" : `บันทึกแล้ว ✓ — เหลืออีก ${fmt(newRemaining)} เส้นรอครั้งถัดไป`);
+      onDone();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-sheet" onClick={e=>e.stopPropagation()}>
+        <h3>{lot.tire_size} <span className="small">{lot.brand}</span></h3>
+        <div className="small">สาขา {lot.branch} · เหลือรอตัดสิน {fmt(remaining)} เส้น (จากทั้งชุด {fmt(lot.qty_received)} เส้น)</div>
+        {(n(lot.qty_sold_good)>0 || n(lot.qty_rejected)>0) && (
+          <div className="small" style={{marginTop:4}}>
+            ผ่านมาแล้ว: รับซื้อ {fmt(n(lot.qty_sold_good))} · ปฏิเสธ {fmt(n(lot.qty_rejected))} เส้น
+          </div>
+        )}
+
+        <div className="grid2" style={{marginTop:10}}>
+          <div>
+            <label>ผู้รับเหมารับซื้อ (ครั้งนี้)</label>
+            <input type="number" inputMode="numeric" min="0" max={remaining} placeholder="0" value={accepted} onChange={e=>setAccepted(e.target.value)} />
+          </div>
+          <div>
+            <label>ผู้รับเหมาปฏิเสธ (ครั้งนี้)</label>
+            <input type="number" inputMode="numeric" min="0" max={remaining} placeholder="0" value={rejected} onChange={e=>setRejected(e.target.value)} />
+          </div>
+        </div>
+        {sum > remaining && <div className="note">⚠️ กรอกรวมกันเกินจำนวนที่เหลือ ({fmt(remaining)} เส้น)</div>}
+        {sum > 0 && sum <= remaining && willRemain > 0 && (
+          <div className="note" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
+            ผู้รับเหมาเอาไปไม่หมด — จะเหลือ {fmt(willRemain)} เส้น รอผู้รับเหมามาคัดต่อในครั้งถัดไป
+          </div>
+        )}
+
+        {hasReject && (
+          <>
+            <div className="note">⚠️ ยางที่ถูกปฏิเสธ {fmt(rejectNow)} เส้น จะถูกย้ายไปรอผู้รับเหมายางเสียอัตโนมัติ</div>
+            <label>หมายเหตุ เหตุผลที่ไม่รับซื้อ</label>
+            <textarea placeholder="เช่น ดอกยางต่างกัน, ยี่ห้อไม่ตรง, สภาพไม่ผ่านเกณฑ์..." value={note} onChange={e=>setNote(e.target.value)} />
+            <label>รูปถ่ายยางที่ถูกปฏิเสธ (สูงสุด 4 รูป) <span className="req">*</span></label>
+            <label className="photo-input">
+              📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
+              <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
+            </label>
+            {files.length>0 && (
+              <div className="thumbs">
+                {files.map((file,i)=>(<img key={i} src={URL.createObjectURL(file)} alt="" />))}
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="grid2" style={{marginTop:16}}>
+          <button className="btn outline" onClick={onClose}>ยกเลิก</button>
+          <button className="btn" disabled={saving || !valid} onClick={submit}>{saving?"กำลังบันทึก...":"ยืนยันผล"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GoodContractorStage({ lots, reload, toast }){
+  const [active, setActive] = useState(null);
+  if (!lots.length) return <div className="empty">ไม่มียางรอผู้รับเหมายางดีคัด 🎉</div>;
+  return (
+    <div>
+      {lots.map(lot=>{
+        const remaining = lot.qty_received - n(lot.qty_sold_good) - n(lot.qty_rejected);
+        const hasProgress = n(lot.qty_sold_good)>0 || n(lot.qty_rejected)>0;
+        return (
+          <div className="lotcard" key={lot.id} onClick={()=>setActive(lot)} style={{cursor:"pointer"}}>
+            <div className="top">
+              <div>
+                <div className="size">{lot.tire_size} <span className="small">{lot.brand}</span></div>
+                <div className="meta">สาขา {lot.branch} · {lot.record_date}</div>
+              </div>
+              <span className="status-badge sb-good_pending">รอคัด</span>
+            </div>
+            <div className="qty">{fmt(remaining)} เส้น <span className="small" style={{fontWeight:400}}>เหลือรอตัดสิน</span></div>
+            {hasProgress && (
+              <div className="small">จากทั้งชุด {fmt(lot.qty_received)} เส้น · รับซื้อแล้ว {fmt(n(lot.qty_sold_good))} · ปฏิเสธแล้ว {fmt(n(lot.qty_rejected))}</div>
+            )}
+            <div className="small" style={{marginTop:8}}>แตะเพื่อบันทึกผลผู้รับเหมา →</div>
+          </div>
+        );
+      })}
+      {active && (
+        <GoodDecisionModal
+          lot={active}
+          toast={toast}
+          onClose={()=>setActive(null)}
+          onDone={()=>{ setActive(null); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   ขั้น 4: ผู้รับเหมายางเสียมารับ (เลือกได้หลายชุด)
+   ============================================================ */
+function BadContractorStage({ lots, reload, toast }){
+  const [selected, setSelected] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (id) => setSelected(p => ({...p, [id]: !p[id]}));
+  const selectedIds = Object.keys(selected).filter(k=>selected[k]);
+  const selectedQty = lots.filter(l=>selected[l.id]).reduce((s,l)=>s+n(l.qty_received),0);
+
+  const confirmCollect = async () => {
+    if (!selectedIds.length) { toast("กรุณาเลือกอย่างน้อย 1 ชุด"); return; }
+    setSaving(true);
+    try {
+      const { error } = await supa.from(TABLE).update({
+        status: "sold_bad",
+        collected_at: new Date().toISOString()
+      }).in("id", selectedIds);
+      // จำนวนแต่ละชุดไม่เท่ากัน จึงอัปเดต qty_sold_bad ทีละแถวต่อจากนี้
+      if (error) throw error;
+      await Promise.all(lots.filter(l=>selected[l.id]).map(l =>
+        supa.from(TABLE).update({ qty_sold_bad: l.qty_received }).eq("id", l.id)
+      ));
+      toast(`ยืนยันรับยางเสีย ${selectedIds.length} ชุด (${fmt(selectedQty)} เส้น) ✓`);
+      setSelected({});
+      reload();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setSaving(false); }
+  };
+
+  if (!lots.length) return <div className="empty">ไม่มียางรอผู้รับเหมายางเสียมารับ 🎉</div>;
+
+  return (
+    <div>
+      {lots.map(lot=>(
+        <label className="checkrow" key={lot.id}>
+          <input type="checkbox" checked={!!selected[lot.id]} onChange={()=>toggle(lot.id)} />
+          <div className="info">
+            <div className="size">{lot.tire_size} <span className="small">{lot.brand}</span></div>
+            <div className="meta">สาขา {lot.branch} · {lot.record_date} · {fmt(lot.qty_received)} เส้น
+              {lot.parent_lot_id ? " · (มาจากยางดีที่ถูกปฏิเสธ)" : ""}
+            </div>
+          </div>
+        </label>
+      ))}
+      <div style={{position:"sticky", bottom:0, background:"var(--bg)", paddingTop:10}}>
+        <button className="btn green" disabled={saving || !selectedIds.length} onClick={confirmCollect}>
+          {saving ? "กำลังบันทึก..." : `✅ ยืนยันรับแล้ว (${selectedIds.length} ชุด · ${fmt(selectedQty)} เส้น)`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   หน้า "งาน" — รวม 4 ขั้นตอนไว้ในที่เดียว ด้วย segmented tabs
+   ============================================================ */
+function WorkScreen({ lots, reload, toast }){
+  const [branch, setBranch] = useState("");
+  const [stage, setStage] = useState("intake");
+
+  const byBranch = (arr) => branch ? arr.filter(l=>l.branch===branch) : arr;
+  const received   = byBranch(lots.filter(l=>l.status==="received"));
+  const goodPending = byBranch(lots.filter(l=>l.status==="good_pending"));
+  const badPending  = byBranch(lots.filter(l=>l.status==="bad_pending"));
+
+  const tabs = [
+    { k:"intake", l:"รับเข้าใหม่" },
+    { k:"sort",   l:"แยกดี/เสีย", cnt: received.length },
+    { k:"good",   l:"ผู้รับเหมาดี", cnt: goodPending.length },
+    { k:"bad",    l:"ผู้รับเหมาเสีย", cnt: badPending.length },
+  ];
+
+  return (
+    <div className="wrap">
+      <div className="card" style={{paddingBottom:6}}>
+        <label style={{marginTop:0}}>กรองดูเฉพาะสาขา (ไม่บังคับ)</label>
+        <select value={branch} onChange={e=>setBranch(e.target.value)}>
+          <option value="">ทุกสาขา</option>
+          {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+        </select>
+      </div>
+
+      <div className="seg">
+        {tabs.map(t=>(
+          <button key={t.k} className={stage===t.k?"active":""} onClick={()=>setStage(t.k)}>
+            {t.l}{typeof t.cnt==="number" && <span className="cnt">{t.cnt}</span>}
+          </button>
+        ))}
+      </div>
+
+      {stage==="intake" && <IntakeForm onSaved={reload} toast={toast} defaultBranch={branch} />}
+      {stage==="sort"   && <SortStage lots={received} reload={reload} toast={toast} />}
+      {stage==="good"   && <GoodContractorStage lots={goodPending} reload={reload} toast={toast} />}
+      {stage==="bad"    && <BadContractorStage lots={badPending} reload={reload} toast={toast} />}
+    </div>
+  );
+}
+
+/* ============================================================
    DASHBOARD
    ============================================================ */
-function Dashboard({ records }){
+function Dashboard({ lots }){
   const months = useMemo(()=>{
-    const s = new Set(records.map(r=>r.month_key));
+    const s = new Set(lots.map(l=>l.month_key));
     return Array.from(s).sort().reverse();
-  }, [records]);
+  }, [lots]);
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
 
   useEffect(()=>{ if(months.length && !month) setMonth(months[0]); }, [months]);
 
-  const filtered = records.filter(r =>
-    (!branch || r.branch===branch) && (!month || r.month_key===month)
+  const filtered = lots.filter(l =>
+    (!branch || l.branch===branch) && (!month || l.month_key===month)
   );
 
   const agg = useMemo(()=>{
-    let goodRemain=0, badRemain=0, soldGood=0, soldBad=0, back=0, rejected=0, received=0;
-    filtered.forEach(r=>{
-      const c = calc(r);
-      goodRemain += c.goodRemain; badRemain += c.badRemain;
-      soldGood += n(r.qty_sold_good); soldBad += n(r.qty_sold_bad);
-      back += n(r.qty_customer_back); rejected += n(r.qty_rejected);
-      received += n(r.qty_received);
+    let goodRemain=0, badRemain=0, waitingSort=0, soldGood=0, soldBad=0, back=0, rejected=0, total=0;
+    filtered.forEach(l=>{
+      back += n(l.qty_customer_back);
+      soldGood += n(l.qty_sold_good);   // สะสมทุกชุด แม้ยังตัดสินไม่ครบ
+      rejected += n(l.qty_rejected);    // สะสมทุกชุด แม้ยังตัดสินไม่ครบ
+      if (l.status === "received")     waitingSort += n(l.qty_received);
+      if (l.status === "good_pending") goodRemain  += (n(l.qty_received) - n(l.qty_sold_good) - n(l.qty_rejected));
+      if (l.status === "bad_pending")  badRemain   += n(l.qty_received);
+      if (l.status === "sold_bad")     soldBad     += n(l.qty_sold_bad);
     });
-    return { total: goodRemain+badRemain, goodRemain, badRemain, soldGood, soldBad, back, rejected, received };
+    total = waitingSort + goodRemain + badRemain;
+    return { total, waitingSort, goodRemain, badRemain, soldGood, soldBad, back, rejected };
   }, [filtered]);
 
   const Box = ({v,l,c}) => (
@@ -390,18 +702,14 @@ function Dashboard({ records }){
         </div>
 
         <div className="stat-grid">
-          <Box v={agg.total}     l="ยางเก่าคงเหลือทั้งหมด" c="#111827" />
-          <Box v={agg.received}  l="รับเข้ายางเก่ารวม" c="#475569" />
-          <Box v={agg.goodRemain} l="ยางเก่าสภาพดี (คงเหลือ)" c="var(--good)" />
-          <Box v={agg.badRemain}  l="ยางเก่าสภาพเสีย (คงเหลือ)" c="var(--bad)" />
-          <Box v={agg.soldGood}  l="ขายผู้รับเหมายางดี" c="var(--blue)" />
-          <Box v={agg.soldBad}   l="ขายผู้รับเหมายางเสีย" c="var(--purple)" />
-          <Box v={agg.back}      l="ลูกค้านำกลับ" c="var(--amber)" />
-          <Box v={agg.rejected}  l="ยางดีที่ถูกปฏิเสธ" c="#be123c" />
-        </div>
-        <div className="small" style={{marginTop:12, lineHeight:1.5}}>
-          * คงเหลือยางดี = เข้ายางดี − ขายผู้รับเหมายางดี − ถูกปฏิเสธ<br/>
-          * คงเหลือยางเสีย = เข้ายางเสีย + ถูกปฏิเสธ − ขายผู้รับเหมายางเสีย
+          <Box v={agg.total}      l="ยางเก่าคงเหลือทั้งหมด" c="#111827" />
+          <Box v={agg.waitingSort} l="รอแยกดี/เสีย" c="#475569" />
+          <Box v={agg.goodRemain}  l="ยางเก่าสภาพดี (รอผู้รับเหมา)" c="var(--good)" />
+          <Box v={agg.badRemain}   l="ยางเก่าสภาพเสีย (รอผู้รับเหมา)" c="var(--bad)" />
+          <Box v={agg.soldGood}   l="ขายผู้รับเหมายางดีแล้ว" c="var(--blue)" />
+          <Box v={agg.soldBad}    l="ขายผู้รับเหมายางเสียแล้ว" c="var(--purple)" />
+          <Box v={agg.back}       l="ลูกค้านำกลับ" c="var(--amber)" />
+          <Box v={agg.rejected}   l="ผู้รับเหมายางดีปฏิเสธ" c="#be123c" />
         </div>
       </div>
     </div>
@@ -411,32 +719,33 @@ function Dashboard({ records }){
 /* ============================================================
    RECORDS LIST + DELETE BY MONTH
    ============================================================ */
-function RecordsList({ records, reload, toast }){
+function RecordsList({ lots, reload, toast }){
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
+  const [status, setStatus] = useState("");
   const [lightbox, setLightbox] = useState(null);
 
   const months = useMemo(()=>{
-    const s = new Set(records.map(r=>r.month_key));
+    const s = new Set(lots.map(l=>l.month_key));
     return Array.from(s).sort().reverse();
-  }, [records]);
+  }, [lots]);
 
-  const filtered = records.filter(r =>
-    (!branch || r.branch===branch) && (!month || r.month_key===month)
+  const filtered = lots.filter(l =>
+    (!branch || l.branch===branch) && (!month || l.month_key===month) && (!status || l.status===status)
   );
 
   const monthSummary = useMemo(()=>{
     const map = {};
-    records.forEach(r=>{ map[r.month_key]=(map[r.month_key]||0)+1; });
+    lots.forEach(l=>{ map[l.month_key]=(map[l.month_key]||0)+1; });
     return Object.entries(map).sort((a,b)=> a[0]<b[0]?1:-1);
-  }, [records]);
+  }, [lots]);
 
   const deleteMonth = async (mk, count) => {
     if (!supa) return;
     if (!confirm(`ลบข้อมูลทั้งหมดของ ${monthThai(mk)} จำนวน ${count} รายการ?\n(ลบรูปถ่ายในเดือนนี้ด้วย — กู้คืนไม่ได้)`)) return;
     try {
-      const recs = records.filter(r=>r.month_key===mk);
-      const paths = recs.flatMap(r => (r.reject_photos||[]).map(p=>p.path)).filter(Boolean);
+      const recs = lots.filter(l=>l.month_key===mk);
+      const paths = recs.flatMap(l => (l.reject_photos||[]).map(p=>p.path)).filter(Boolean);
       if (paths.length) await supa.storage.from(BUCKET).remove(paths);
       const { error } = await supa.from(TABLE).delete().eq("month_key", mk);
       if (error) throw error;
@@ -472,41 +781,47 @@ function RecordsList({ records, reload, toast }){
             {months.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
           </select>
         </div>
+        <select value={status} onChange={e=>setStatus(e.target.value)} style={{marginBottom:12}}>
+          <option value="">ทุกสถานะ</option>
+          {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+        </select>
 
         {filtered.length===0
           ? <div className="empty">ไม่พบรายการ</div>
-          : filtered.map(r=>{
-            const c = calc(r);
-            return (
-              <div className="rec" key={r.id}>
-                <div className="top">
-                  <div>
-                    <div className="size">{r.tire_size} <span className="small">{r.brand}</span></div>
-                    <div className="meta">สาขา {r.branch} · {r.record_date}</div>
-                  </div>
-                  <span className="pill" style={{background:"#f3f4f6", color:"#374151"}}>คงเหลือ {fmt(c.totalRemain)}</span>
+          : filtered.map(l=>(
+            <div className="rec" key={l.id}>
+              <div className="top">
+                <div>
+                  <div className="size">{l.tire_size} <span className="small">{l.brand}</span></div>
+                  <div className="meta">สาขา {l.branch} · {l.record_date}{l.parent_lot_id ? " · มาจากยางดีที่ถูกปฏิเสธ" : ""}</div>
                 </div>
-                <table>
-                  <tbody>
-                    <tr><td>รับเข้ายางเก่า</td><td>{fmt(n(r.qty_received))}</td></tr>
-                    <tr><td>เข้ายางดี / เข้ายางเสีย</td><td>{fmt(n(r.qty_good))} / {fmt(n(r.qty_bad))}</td></tr>
-                    <tr><td>ลูกค้านำกลับ</td><td>{fmt(n(r.qty_customer_back))}</td></tr>
-                    <tr><td>ขายผู้รับเหมา ดี / เสีย</td><td>{fmt(n(r.qty_sold_good))} / {fmt(n(r.qty_sold_bad))}</td></tr>
-                    <tr><td style={{color:"var(--bad)"}}>ยางดีถูกปฏิเสธ → ย้ายเข้ายางเสีย</td><td style={{color:"var(--bad)"}}>{fmt(n(r.qty_rejected))}</td></tr>
-                    <tr><td>คงเหลือ ดี / เสีย</td><td>{fmt(c.goodRemain)} / {fmt(c.badRemain)}</td></tr>
-                  </tbody>
-                </table>
-                {r.reject_note && <div className="note">หมายเหตุ: {r.reject_note}</div>}
-                {(r.reject_photos||[]).length>0 && (
-                  <div className="thumbs">
-                    {r.reject_photos.map((p,i)=>(
-                      <img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />
-                    ))}
-                  </div>
-                )}
+                <span className={"status-badge sb-"+l.status}>{STATUS_LABEL[l.status]}</span>
               </div>
-            );
-          })
+              <table>
+                <tbody>
+                  <tr><td>จำนวนสุทธิเข้าสต็อก</td><td>{fmt(n(l.qty_received))}</td></tr>
+                  {n(l.qty_customer_back)>0 && <tr><td>ลูกค้านำกลับ</td><td>{fmt(n(l.qty_customer_back))}</td></tr>}
+                  {l.side && <tr><td>ฝั่ง</td><td>{l.side==="good"?"ยางดี":"ยางเสีย"}</td></tr>}
+                  {(n(l.qty_sold_good)>0 || n(l.qty_rejected)>0) && <tr><td>ผู้รับเหมายางดีรับซื้อ / ปฏิเสธ</td><td>{fmt(n(l.qty_sold_good))} / {fmt(n(l.qty_rejected))}</td></tr>}
+                  {l.status==="sold_bad" && <tr><td>ผู้รับเหมายางเสียรับไป</td><td>{fmt(n(l.qty_sold_bad))}</td></tr>}
+                </tbody>
+              </table>
+              {(l.intake_photos||[]).length>0 && (
+                <>
+                  <div className="small" style={{marginTop:8}}>📷 รูปตอนรับเข้า</div>
+                  <div className="thumbs">
+                    {l.intake_photos.map((p,i)=>(<img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />))}
+                  </div>
+                </>
+              )}
+              {l.reject_note && <div className="note">หมายเหตุ: {l.reject_note}</div>}
+              {(l.reject_photos||[]).length>0 && (
+                <div className="thumbs">
+                  {l.reject_photos.map((p,i)=>(<img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />))}
+                </div>
+              )}
+            </div>
+          ))
         }
       </div>
 
@@ -523,48 +838,48 @@ function RecordsList({ records, reload, toast }){
 /* ============================================================
    ADMIN EXPORT
    ============================================================ */
-function Admin({ records, toast }){
+function Admin({ lots, toast }){
   const months = useMemo(()=>{
-    const s = new Set(records.map(r=>r.month_key));
+    const s = new Set(lots.map(l=>l.month_key));
     return Array.from(s).sort().reverse();
-  }, [records]);
+  }, [lots]);
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
+  const [status, setStatus] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
-  const filtered = records.filter(r=>{
-    if (branch && r.branch!==branch) return false;
-    if (month && r.month_key!==month) return false;
-    if (from && r.record_date < from) return false;
-    if (to && r.record_date > to) return false;
+  const filtered = lots.filter(l=>{
+    if (branch && l.branch!==branch) return false;
+    if (month && l.month_key!==month) return false;
+    if (status && l.status!==status) return false;
+    if (from && l.record_date < from) return false;
+    if (to && l.record_date > to) return false;
     return true;
   });
 
   const exportExcel = () => {
     if (!filtered.length){ toast("ไม่มีข้อมูลให้ส่งออก"); return; }
-    const rows = filtered.map(r=>{
-      const c = calc(r);
-      return {
-        "วันที่": r.record_date,
-        "สาขา": r.branch,
-        "ขนาดยาง": r.tire_size,
-        "ยี่ห้อ": r.brand,
-        "รับเข้ายางเก่า": n(r.qty_received),
-        "เข้าสต็อกยางดี": n(r.qty_good),
-        "เข้าสต็อกยางเสีย": n(r.qty_bad),
-        "ลูกค้านำกลับ": n(r.qty_customer_back),
-        "ขายผู้รับเหมายางดี": n(r.qty_sold_good),
-        "ขายผู้รับเหมายางเสีย": n(r.qty_sold_bad),
-        "ยางดีถูกปฏิเสธ": n(r.qty_rejected),
-        "คงเหลือยางดี": c.goodRemain,
-        "คงเหลือยางเสีย": c.badRemain,
-        "คงเหลือรวม": c.totalRemain,
-        "หมายเหตุ": r.reject_note || "",
-        "จำนวนรูป": (r.reject_photos||[]).length,
-        "ลิงก์รูป": (r.reject_photos||[]).map(p=>p.url).join(" , ")
-      };
-    });
+    const rows = filtered.map(l=>({
+      "วันที่รับเข้า": l.record_date,
+      "สาขา": l.branch,
+      "ขนาดยาง": l.tire_size,
+      "ยี่ห้อ": l.brand,
+      "รับจากลูกค้า": n(l.qty_total_intake),
+      "ลูกค้านำกลับ": n(l.qty_customer_back),
+      "เข้าสต็อกสุทธิ": n(l.qty_received),
+      "ฝั่ง": l.side==="good"?"ดี":(l.side==="bad"?"เสีย":""),
+      "สถานะ": STATUS_LABEL[l.status] || l.status,
+      "ผู้รับเหมายางดีรับซื้อ": n(l.qty_sold_good),
+      "ผู้รับเหมายางดีปฏิเสธ": n(l.qty_rejected),
+      "ผู้รับเหมายางเสียรับไป": n(l.qty_sold_bad),
+      "มาจากการปฏิเสธ (lot เดิม)": l.parent_lot_id ? "ใช่" : "",
+      "หมายเหตุ": l.reject_note || "",
+      "จำนวนรูปตอนรับเข้า": (l.intake_photos||[]).length,
+      "ลิงก์รูปตอนรับเข้า": (l.intake_photos||[]).map(p=>p.url).join(" , "),
+      "จำนวนรูปปฏิเสธ": (l.reject_photos||[]).length,
+      "ลิงก์รูปปฏิเสธ": (l.reject_photos||[]).map(p=>p.url).join(" , ")
+    }));
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = Object.keys(rows[0]).map(k=>({ wch: Math.max(12, k.length+2) }));
     const wb = XLSX.utils.book_new();
@@ -602,10 +917,16 @@ function Admin({ records, toast }){
             <input type="date" value={to} onChange={e=>setTo(e.target.value)} />
           </div>
         </div>
+        <label style={{margin:"0 0 4px"}}>สถานะ</label>
+        <select value={status} onChange={e=>setStatus(e.target.value)} style={{marginBottom:12}}>
+          <option value="">ทุกสถานะ</option>
+          {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+        </select>
+
         <div className="row-between" style={{marginBottom:12}}>
           <span className="small">พบ {filtered.length} รายการ ตามเงื่อนไข</span>
           <button className="btn outline" style={{width:"auto", padding:"8px 14px"}}
-            onClick={()=>{ setBranch(""); setMonth(""); setFrom(""); setTo(""); }}>ล้างตัวกรอง</button>
+            onClick={()=>{ setBranch(""); setMonth(""); setStatus(""); setFrom(""); setTo(""); }}>ล้างตัวกรอง</button>
         </div>
         <button className="btn green" onClick={exportExcel}>📥 ดาวน์โหลดไฟล์ Excel</button>
       </div>
@@ -617,8 +938,8 @@ function Admin({ records, toast }){
    APP
    ============================================================ */
 function App(){
-  const [tab, setTab] = useState("form");
-  const [records, setRecords] = useState([]);
+  const [tab, setTab] = useState("work");
+  const [lots, setLots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, toastNode] = useToast();
 
@@ -627,14 +948,14 @@ function App(){
     setLoading(true);
     const { data, error } = await supa.from(TABLE).select("*").order("record_date",{ascending:false}).order("created_at",{ascending:false});
     if (error){ console.error(error); toast("โหลดข้อมูลผิดพลาด"); }
-    setRecords(data || []);
+    setLots(data || []);
     setLoading(false);
   }, [toast]);
 
   useEffect(()=>{ reload(); }, [reload]);
 
   const tabs = [
-    { k:"form",  ic:"📝", l:"บันทึก" },
+    { k:"work",  ic:"📝", l:"บันทึก" },
     { k:"dash",  ic:"📊", l:"แดชบอร์ด" },
     { k:"list",  ic:"📋", l:"รายการ" },
     { k:"admin", ic:"⚙️", l:"แอดมิน" },
@@ -650,7 +971,7 @@ function App(){
       {!supa && (
         <div className="banner">
           ⚠️ <b>ยังไม่ได้ตั้งค่า Supabase</b><br/>
-          เปิดไฟล์ <code>index.html</code> แล้วใส่ค่า <code>SUPABASE_URL</code> และ <code>SUPABASE_ANON_KEY</code> ที่ส่วนบนของสคริปต์ จากนั้นรัน SQL ที่แนบมาเพื่อสร้างตารางและ Storage
+          เปิดไฟล์ <code>index.html</code> แล้วใส่ค่า <code>SUPABASE_URL</code> และ <code>SUPABASE_ANON_KEY</code> ที่ส่วนบนของสคริปต์
         </div>
       )}
 
@@ -658,10 +979,10 @@ function App(){
         ? <div className="empty" style={{paddingTop:40}}>กำลังโหลด...</div>
         : (
           <>
-            {tab==="form"  && <RecordForm onSaved={reload} toast={toast} />}
-            {tab==="dash"  && <Dashboard records={records} />}
-            {tab==="list"  && <RecordsList records={records} reload={reload} toast={toast} />}
-            {tab==="admin" && <Admin records={records} toast={toast} />}
+            {tab==="work"  && <WorkScreen lots={lots} reload={reload} toast={toast} />}
+            {tab==="dash"  && <Dashboard lots={lots} />}
+            {tab==="list"  && <RecordsList lots={lots} reload={reload} toast={toast} />}
+            {tab==="admin" && <Admin lots={lots} toast={toast} />}
           </>
         )
       }
