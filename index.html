@@ -886,10 +886,12 @@ function Dashboard({ lots, deposits }){
 /* ============================================================
    RECORDS LIST + DELETE BY MONTH
    ============================================================ */
-function RecordsList({ lots, reload, toast }){
+function RecordsList({ lots, reload, toast, deposits, reloadDeposits }){
+  const [dataset, setDataset] = useState("lots"); // lots | deposits
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
   const [status, setStatus] = useState("");
+  const [origin, setOrigin] = useState(""); // "" | rejected | from_deposit
   const [lightbox, setLightbox] = useState(null);
 
   const months = useMemo(()=>{
@@ -898,7 +900,8 @@ function RecordsList({ lots, reload, toast }){
   }, [lots]);
 
   const filtered = lots.filter(l =>
-    (!branch || l.branch===branch) && (!month || l.month_key===month) && (!status || l.status===status)
+    (!branch || l.branch===branch) && (!month || l.month_key===month) && (!status || l.status===status) &&
+    (!origin || (origin==="rejected" ? !!l.parent_lot_id : !!l.from_deposit_id))
   );
 
   const monthSummary = useMemo(()=>{
@@ -936,6 +939,15 @@ function RecordsList({ lots, reload, toast }){
 
   return (
     <div className="wrap">
+      <div className="seg">
+        <button className={dataset==="lots"?"active":""} onClick={()=>setDataset("lots")}>🛞 ยางเก่า (สต็อก)</button>
+        <button className={dataset==="deposits"?"active":""} onClick={()=>setDataset("deposits")}>🅿️ ยางฝาก</button>
+      </div>
+
+      {dataset === "deposits" ? (
+        <DepositList deposits={deposits} reload={reloadDeposits} toast={toast} />
+      ) : (
+      <>
       <div className="card">
         <h2>🗂️ จัดการข้อมูลรายเดือน</h2>
         {monthSummary.length===0
@@ -961,10 +973,17 @@ function RecordsList({ lots, reload, toast }){
             {months.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
           </select>
         </div>
-        <select value={status} onChange={e=>setStatus(e.target.value)} style={{marginBottom:12}}>
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
-        </select>
+        <div className="filterbar" style={{marginBottom:12}}>
+          <select value={status} onChange={e=>setStatus(e.target.value)}>
+            <option value="">ทุกสถานะ</option>
+            {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+          </select>
+          <select value={origin} onChange={e=>setOrigin(e.target.value)}>
+            <option value="">ทุกแหล่งที่มา</option>
+            <option value="rejected">มาจากยางดีที่ถูกปฏิเสธ</option>
+            <option value="from_deposit">มาจากยางฝากไม่มารับ</option>
+          </select>
+        </div>
 
         {filtered.length===0
           ? <div className="empty">ไม่พบรายการ</div>
@@ -1018,6 +1037,8 @@ function RecordsList({ lots, reload, toast }){
           <img src={lightbox} alt="" onClick={e=>e.stopPropagation()} />
         </div>
       )}
+      </>
+      )}
     </div>
   );
 }
@@ -1025,7 +1046,10 @@ function RecordsList({ lots, reload, toast }){
 /* ============================================================
    ADMIN EXPORT
    ============================================================ */
-function Admin({ lots, toast }){
+function Admin({ lots, toast, deposits }){
+  const [dataset, setDataset] = useState("lots"); // lots | deposits
+
+  /* ---------- ยางเก่า (สต็อก) ---------- */
   const months = useMemo(()=>{
     const s = new Set(lots.map(l=>l.month_key));
     return Array.from(s).sort().reverse();
@@ -1033,6 +1057,7 @@ function Admin({ lots, toast }){
   const [branch, setBranch] = useState("");
   const [month, setMonth] = useState("");
   const [status, setStatus] = useState("");
+  const [origin, setOrigin] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -1040,6 +1065,8 @@ function Admin({ lots, toast }){
     if (branch && l.branch!==branch) return false;
     if (month && l.month_key!==month) return false;
     if (status && l.status!==status) return false;
+    if (origin === "rejected" && !l.parent_lot_id) return false;
+    if (origin === "from_deposit" && !l.from_deposit_id) return false;
     if (from && l.record_date < from) return false;
     if (to && l.record_date > to) return false;
     return true;
@@ -1077,10 +1104,66 @@ function Admin({ lots, toast }){
     toast("ส่งออก Excel แล้ว ✓");
   };
 
+  /* ---------- ยางฝาก ---------- */
+  const depMonths = useMemo(()=>{
+    const s = new Set(deposits.map(d=>d.month_key));
+    return Array.from(s).sort().reverse();
+  }, [deposits]);
+  const [dBranch, setDBranch] = useState("");
+  const [dMonth, setDMonth] = useState("");
+  const [dStatus, setDStatus] = useState("");
+  const [dFrom, setDFrom] = useState("");
+  const [dTo, setDTo] = useState("");
+
+  const filteredDeposits = deposits.filter(d=>{
+    if (dBranch && d.branch!==dBranch) return false;
+    if (dMonth && d.month_key!==dMonth) return false;
+    if (dStatus && d.status!==dStatus) return false;
+    if (dFrom && d.deposit_date < dFrom) return false;
+    if (dTo && d.deposit_date > dTo) return false;
+    return true;
+  });
+
+  const depositStatusLabel = (s) => s==="deposited" ? "ฝากอยู่" : s==="picked_up" ? "รับคืนแล้ว" : "ย้ายเข้าสต็อกแล้ว";
+
+  const exportDepositsExcel = () => {
+    if (!filteredDeposits.length){ toast("ไม่มีข้อมูลให้ส่งออก"); return; }
+    const rows = filteredDeposits.map(d=>({
+      "วันที่ฝาก": d.deposit_date,
+      "สาขา": d.branch,
+      "ชื่อลูกค้า": d.customer_name,
+      "เบอร์โทร": d.phone || "",
+      "ทะเบียนรถ": d.plate_number,
+      "จังหวัด": d.plate_province,
+      "จำนวนเส้น": n(d.qty),
+      "สถานะ": depositStatusLabel(d.status),
+      "วันที่มารับ": d.pickup_date || "",
+      "ย้ายเข้าสต็อกเมื่อ": (d.converted_at||"").slice(0,10),
+      "หมายเหตุ": d.note || "",
+      "จำนวนรูปตอนฝาก": (d.deposit_photos||[]).length,
+      "ลิงก์รูปตอนฝาก": (d.deposit_photos||[]).map(p=>p.url).join(" , "),
+      "จำนวนรูปตอนมารับ": (d.pickup_photos||[]).length,
+      "ลิงก์รูปตอนมารับ": (d.pickup_photos||[]).map(p=>p.url).join(" , ")
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = Object.keys(rows[0]).map(k=>({ wch: Math.max(12, k.length+2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายงานยางฝาก");
+    const tag = [dBranch||"ทุกสาขา", dMonth||"ทุกเดือน"].join("_");
+    XLSX.writeFile(wb, `รายงานยางฝาก_${tag}_${todayStr()}.xlsx`);
+    toast("ส่งออก Excel แล้ว ✓");
+  };
+
   return (
     <div className="wrap">
+      <div className="seg">
+        <button className={dataset==="lots"?"active":""} onClick={()=>setDataset("lots")}>🛞 ยางเก่า (สต็อก)</button>
+        <button className={dataset==="deposits"?"active":""} onClick={()=>setDataset("deposits")}>🅿️ ยางฝาก</button>
+      </div>
+
+      {dataset === "lots" ? (
       <div className="card">
-        <h2>⚙️ แอดมิน — ส่งออกรายงาน Excel</h2>
+        <h2>⚙️ ส่งออกรายงาน — ยางเก่า (สต็อก)</h2>
         <div className="filterbar">
           <div>
             <label style={{margin:"0 0 4px"}}>สาขา</label>
@@ -1105,19 +1188,74 @@ function Admin({ lots, toast }){
             <input type="date" value={to} onChange={e=>setTo(e.target.value)} />
           </div>
         </div>
-        <label style={{margin:"0 0 4px"}}>สถานะ</label>
-        <select value={status} onChange={e=>setStatus(e.target.value)} style={{marginBottom:12}}>
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
-        </select>
+        <div className="filterbar" style={{marginBottom:12}}>
+          <div>
+            <label style={{margin:"0 0 4px"}}>สถานะ</label>
+            <select value={status} onChange={e=>setStatus(e.target.value)}>
+              <option value="">ทุกสถานะ</option>
+              {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>แหล่งที่มา</label>
+            <select value={origin} onChange={e=>setOrigin(e.target.value)}>
+              <option value="">ทุกแหล่งที่มา</option>
+              <option value="rejected">มาจากยางดีที่ถูกปฏิเสธ</option>
+              <option value="from_deposit">มาจากยางฝากไม่มารับ</option>
+            </select>
+          </div>
+        </div>
 
         <div className="row-between" style={{marginBottom:12}}>
           <span className="small">พบ {filtered.length} รายการ ตามเงื่อนไข</span>
           <button className="btn outline" style={{width:"auto", padding:"8px 14px"}}
-            onClick={()=>{ setBranch(""); setMonth(""); setStatus(""); setFrom(""); setTo(""); }}>ล้างตัวกรอง</button>
+            onClick={()=>{ setBranch(""); setMonth(""); setStatus(""); setOrigin(""); setFrom(""); setTo(""); }}>ล้างตัวกรอง</button>
         </div>
         <button className="btn green" onClick={exportExcel}>📥 ดาวน์โหลดไฟล์ Excel</button>
       </div>
+      ) : (
+      <div className="card">
+        <h2>⚙️ ส่งออกรายงาน — ยางฝาก</h2>
+        <div className="filterbar">
+          <div>
+            <label style={{margin:"0 0 4px"}}>สาขา</label>
+            <select value={dBranch} onChange={e=>setDBranch(e.target.value)}>
+              <option value="">ทุกสาขา</option>
+              {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>เดือน</label>
+            <select value={dMonth} onChange={e=>setDMonth(e.target.value)}>
+              <option value="">ทุกเดือน</option>
+              {depMonths.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>ตั้งแต่วันที่</label>
+            <input type="date" value={dFrom} onChange={e=>setDFrom(e.target.value)} />
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>ถึงวันที่</label>
+            <input type="date" value={dTo} onChange={e=>setDTo(e.target.value)} />
+          </div>
+        </div>
+        <label style={{margin:"0 0 4px"}}>สถานะ</label>
+        <select value={dStatus} onChange={e=>setDStatus(e.target.value)} style={{marginBottom:12}}>
+          <option value="">ทุกสถานะ</option>
+          <option value="deposited">ฝากอยู่</option>
+          <option value="picked_up">รับคืนแล้ว</option>
+          <option value="moved_to_stock">ย้ายเข้าสต็อกแล้ว</option>
+        </select>
+
+        <div className="row-between" style={{marginBottom:12}}>
+          <span className="small">พบ {filteredDeposits.length} รายการ ตามเงื่อนไข</span>
+          <button className="btn outline" style={{width:"auto", padding:"8px 14px"}}
+            onClick={()=>{ setDBranch(""); setDMonth(""); setDStatus(""); setDFrom(""); setDTo(""); }}>ล้างตัวกรอง</button>
+        </div>
+        <button className="btn green" onClick={exportDepositsExcel}>📥 ดาวน์โหลดไฟล์ Excel</button>
+      </div>
+      )}
     </div>
   );
 }
@@ -1686,8 +1824,8 @@ function App(){
             {tab==="work"    && <WorkScreen lots={lots} reload={reload} toast={toast} lockedBranch={lockedBranch} />}
             {tab==="deposit" && <DepositScreen deposits={deposits} reload={reloadDeposits} toast={toast} lockedBranch={lockedBranch} />}
             {tab==="dash"    && <Dashboard lots={lots} deposits={deposits} />}
-            {tab==="list"    && <RecordsList lots={lots} reload={reload} toast={toast} />}
-            {tab==="admin"   && <Admin lots={lots} toast={toast} />}
+            {tab==="list"    && <RecordsList lots={lots} reload={reload} toast={toast} deposits={deposits} reloadDeposits={reloadDeposits} />}
+            {tab==="admin"   && <Admin lots={lots} toast={toast} deposits={deposits} />}
           </>
         )
       }
