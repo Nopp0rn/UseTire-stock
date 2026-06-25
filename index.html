@@ -4,13 +4,36 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>ระบบบันทึกยางเก่า ดี/เสีย - COCKPIT</title>
+<script>
+  // ระบบจับ error แสดงบนหน้าจอ (กันจอขาวแบบไม่รู้สาเหตุ)
+  window.showFatalError = function(msg){
+    function append(){
+      var el = document.getElementById('fatal-error');
+      if(!el){
+        el = document.createElement('div');
+        el.id = 'fatal-error';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 16px;font-family:sans-serif;font-size:13px;z-index:99999;white-space:pre-wrap;line-height:1.6;max-height:60vh;overflow:auto;';
+        document.body.appendChild(el);
+      }
+      el.textContent += (el.textContent ? '\n' : '') + '⚠️ ' + msg;
+    }
+    if (document.body) append();
+    else document.addEventListener('DOMContentLoaded', append);
+  };
+  window.addEventListener('error', function(e){
+    window.showFatalError('JS Error: ' + (e.message || e.type || 'unknown'));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){
+    window.showFatalError('Promise Error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" onerror="showFatalError('โหลด React ไม่สำเร็จ (เช็คอินเทอร์เน็ต/ลองเปลี่ยนเครือข่าย)')"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" onerror="showFatalError('โหลด ReactDOM ไม่สำเร็จ (เช็คอินเทอร์เน็ต/ลองเปลี่ยนเครือข่าย)')"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js" onerror="showFatalError('โหลด Babel ไม่สำเร็จ (เช็คอินเทอร์เน็ต/ลองเปลี่ยนเครือข่าย)')"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="showFatalError('โหลด Supabase ไม่สำเร็จ (เช็คอินเทอร์เน็ต/ลองเปลี่ยนเครือข่าย)')"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="showFatalError('โหลด XLSX ไม่สำเร็จ (เช็คอินเทอร์เน็ต/ลองเปลี่ยนเครือข่าย)')"></script>
 <style>
   :root{
     --red:#d32029; --red-dark:#a3151c; --ink:#1c1c1e; --muted:#6b7280;
@@ -74,7 +97,21 @@
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <div style="padding:60px 20px; text-align:center; font-family:'Sarabun',sans-serif; color:#6b7280;">
+    <div style="font-size:32px; margin-bottom:10px;">⏳</div>
+    กำลังโหลดแอป...<br/>
+    <span style="font-size:12px;">ถ้าหน้านี้ไม่เปลี่ยนภายใน 10 วินาที จะมีข้อความสีแดงแจ้งสาเหตุที่ด้านบนของจอ</span>
+  </div>
+</div>
+<script>
+  setTimeout(function(){
+    var root = document.getElementById('root');
+    if (root && root.getAttribute('data-mounted') !== '1') {
+      window.showFatalError('แอปโหลดไม่สำเร็จ: สคริปต์ไม่ทำงาน (อาจเกิดจากอินเทอร์เน็ตช้า, CDN โหลดไม่ผ่าน, หรือเบราว์เซอร์เก่าเกินไป) — ลองรีโหลดหน้า หรือเปิดด้วย Chrome/Safari เวอร์ชันล่าสุด');
+    }
+  }, 7000);
+</script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useCallback } = React;
 
@@ -642,7 +679,13 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  document.getElementById("root").setAttribute("data-mounted", "1");
+} catch (err) {
+  console.error(err);
+  window.showFatalError("Render Error: " + (err && err.message ? err.message : String(err)));
+}
 </script>
 </body>
 </html>
