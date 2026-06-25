@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>ระบบบันทึกยางเก่า ดี/เสีย - COCKPIT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --red:#d32029; --red-dark:#a3151c; --ink:#1c1c1e; --muted:#6b7280;
+    --bg:#f3f4f6; --card:#ffffff; --line:#e5e7eb;
+    --good:#16a34a; --bad:#dc2626; --blue:#2563eb; --amber:#d97706; --purple:#7c3aed;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; font-family:'Sarabun',sans-serif; background:var(--bg); color:var(--ink); font-size:15px;}
+  .app{max-width:760px; margin:0 auto; padding-bottom:84px;}
+  header{background:linear-gradient(135deg,var(--red),var(--red-dark)); color:#fff; padding:16px 18px; position:sticky; top:0; z-index:30;}
+  header h1{margin:0; font-size:18px; font-weight:700; letter-spacing:.3px;}
+  header .sub{font-size:12px; opacity:.9; margin-top:2px;}
+  .wrap{padding:14px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px;}
+  .card h2{margin:0 0 12px; font-size:16px; font-weight:700;}
+  label{display:block; font-size:13px; font-weight:600; color:#374151; margin:10px 0 4px;}
+  input, select, textarea{width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:10px; font-family:inherit; font-size:15px; background:#fff;}
+  input:focus, select:focus, textarea:focus{outline:none; border-color:var(--red);}
+  textarea{min-height:64px; resize:vertical;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;}
+  .btn{display:inline-flex; align-items:center; justify-content:center; gap:6px; width:100%; padding:13px; border:none; border-radius:11px; background:var(--red); color:#fff; font-family:inherit; font-weight:700; font-size:15px; cursor:pointer;}
+  .btn:disabled{opacity:.55;}
+  .btn.gray{background:#374151;}
+  .btn.green{background:var(--good);}
+  .btn.outline{background:#fff; color:var(--ink); border:1px solid var(--line);}
+  .btn.danger{background:var(--bad);}
+  .navbar{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); display:flex; max-width:760px; margin:0 auto; z-index:40;}
+  .navbar button{flex:1; background:none; border:none; padding:9px 4px 8px; font-family:inherit; font-size:11px; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px;}
+  .navbar button.active{color:var(--red); font-weight:700;}
+  .navbar .ic{font-size:19px;}
+  .stat-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .stat{border-radius:13px; padding:14px; color:#fff;}
+  .stat .v{font-size:26px; font-weight:700; line-height:1;}
+  .stat .l{font-size:12px; margin-top:6px; opacity:.95;}
+  .pill{display:inline-block; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700;}
+  .rec{border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px;}
+  .rec .top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+  .rec .size{font-weight:700; font-size:15px;}
+  .rec .meta{font-size:12px; color:var(--muted); margin-top:2px;}
+  .rec table{width:100%; border-collapse:collapse; margin-top:8px; font-size:12.5px;}
+  .rec td{padding:3px 0;}
+  .rec td:last-child{text-align:right; font-weight:600;}
+  .thumbs{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
+  .thumbs img{width:60px; height:60px; object-fit:cover; border-radius:8px; border:1px solid var(--line); cursor:pointer;}
+  .note{background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; padding:8px 10px; border-radius:9px; font-size:12.5px; margin-top:8px;}
+  .banner{background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:12px 14px; border-radius:11px; font-size:13px; margin:14px; line-height:1.5;}
+  .lightbox{position:fixed; inset:0; background:rgba(0,0,0,.9); display:flex; align-items:center; justify-content:center; z-index:90; padding:16px;}
+  .lightbox img{max-width:100%; max-height:90vh; border-radius:8px;}
+  .lightbox .x{position:absolute; top:16px; right:16px; color:#fff; font-size:32px; cursor:pointer;}
+  .small{font-size:12px; color:var(--muted);}
+  .row-between{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .filterbar{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;}
+  .empty{text-align:center; color:var(--muted); padding:30px 10px; font-size:14px;}
+  .toast{position:fixed; bottom:96px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:11px 18px; border-radius:999px; font-size:13.5px; z-index:95; max-width:90%; text-align:center;}
+  .photo-input{border:1px dashed #cbd5e1; border-radius:10px; padding:14px; text-align:center; color:var(--muted); font-size:13px;}
+  .monthrow{display:flex; justify-content:space-between; align-items:center; padding:11px 0; border-bottom:1px solid var(--line);}
+  .monthrow:last-child{border-bottom:none;}
+  .badge{background:#f3f4f6; padding:2px 9px; border-radius:999px; font-size:12px; color:#374151; font-weight:600;}
+  .req{color:var(--red);}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+/* ============================================================
+   ⚙️ ตั้งค่า Supabase — ใส่ค่าของพี่นพพรตรงนี้
+   ============================================================ */
+const SUPABASE_URL = "https://yigveyqcfzkxjzsrlger.supabase.co";        // TireTrack
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpZ3ZleXFjZnpreGp6c3JsZ2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjYzMjUsImV4cCI6MjA5NDYwMjMyNX0.5fkhW2ITHwuF2KCLcbY9Eo2E6-eTnuk8B-vTVSMRXbQ";   // TireTrack anon
+const BUCKET = "tire-photos";
+/* ============================================================ */
+
+const BRANCHES = ["003","009","010","012","014","048","050","096","107","143"];
+const TABLE = "tire_records";
+
+const supa = (SUPABASE_URL && SUPABASE_ANON_KEY)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ---------- helpers ---------- */
+const todayStr = () => {
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off*60000).toISOString().slice(0,10);
+};
+const monthKeyOf = (dateStr) => (dateStr || todayStr()).slice(0,7);
+const monthThai = (mk) => {
+  const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+  const [y,m] = mk.split("-");
+  return months[parseInt(m,10)-1] + " " + (parseInt(y,10)+543);
+};
+const n = (v) => { const x = parseInt(v,10); return isNaN(x) ? 0 : x; };
+const fmt = (v) => (v||0).toLocaleString("th-TH");
+
+// สูตรคำนวณคงเหลือต่อรายการ (ยางดีถูกปฏิเสธ -> ย้ายเข้ายางเสียอัตโนมัติ)
+const calc = (r) => {
+  const goodRemain = n(r.qty_good) - n(r.qty_sold_good) - n(r.qty_rejected);
+  const badRemain  = n(r.qty_bad)  + n(r.qty_rejected)  - n(r.qty_sold_bad);
+  return { goodRemain, badRemain, totalRemain: goodRemain + badRemain };
+};
+
+function compressImage(file, maxDim = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxDim) { height = Math.round(height*maxDim/width); width = maxDim; }
+        else if (height >= width && height > maxDim) { width = Math.round(width*maxDim/height); height = maxDim; }
+        const c = document.createElement("canvas");
+        c.width = width; c.height = height;
+        c.getContext("2d").drawImage(img, 0, 0, width, height);
+        c.toBlob(b => b ? resolve(b) : reject(new Error("compress fail")), "image/jpeg", quality);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------- Toast ---------- */
+function useToast(){
+  const [msg, setMsg] = useState(null);
+  const show = useCallback((m)=>{ setMsg(m); setTimeout(()=>setMsg(null), 2600); }, []);
+  const node = msg ? <div className="toast">{msg}</div> : null;
+  return [show, node];
+}
+
+/* ============================================================
+   FORM
+   ============================================================ */
+function RecordForm({ onSaved, toast }){
+  const blank = {
+    branch:"", record_date: todayStr(), tire_size:"", brand:"",
+    qty_received:"", qty_good:"", qty_bad:"", qty_customer_back:"",
+    qty_sold_good:"", qty_sold_bad:"", qty_rejected:"", reject_note:""
+  };
+  const [f, setF] = useState(blank);
+  const [files, setFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const set = (k,v) => setF(p => ({...p, [k]:v}));
+  const hasReject = n(f.qty_rejected) > 0;
+
+  const onPickFiles = (e) => {
+    const list = Array.from(e.target.files || []).slice(0,4);
+    setFiles(list);
+  };
+
+  const submit = async () => {
+    if (!supa) { toast("ยังไม่ได้ตั้งค่า Supabase"); return; }
+    if (!f.branch) { toast("กรุณาเลือกสาขา"); return; }
+    if (!f.tire_size.trim()) { toast("กรุณากรอกขนาดยาง"); return; }
+    setSaving(true);
+    try {
+      let photos = [];
+      if (hasReject && files.length){
+        for (const file of files){
+          const blob = await compressImage(file);
+          const path = `${f.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
+          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+          if (error) throw error;
+          const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+          photos.push({ url: data.publicUrl, path });
+        }
+      }
+      const row = {
+        record_date: f.record_date,
+        month_key: monthKeyOf(f.record_date),
+        branch: f.branch,
+        tire_size: f.tire_size.trim(),
+        brand: f.brand.trim(),
+        qty_received: n(f.qty_received),
+        qty_good: n(f.qty_good),
+        qty_bad: n(f.qty_bad),
+        qty_customer_back: n(f.qty_customer_back),
+        qty_sold_good: n(f.qty_sold_good),
+        qty_sold_bad: n(f.qty_sold_bad),
+        qty_rejected: n(f.qty_rejected),
+        reject_note: f.reject_note.trim(),
+        reject_photos: photos
+      };
+      const { error } = await supa.from(TABLE).insert([row]);
+      if (error) throw error;
+      toast("บันทึกสำเร็จ ✓");
+      setF({ ...blank, branch: f.branch, record_date: todayStr() });
+      setFiles([]);
+      onSaved && onSaved();
+    } catch(err){
+      console.error(err);
+      toast("ผิดพลาด: " + (err.message || "บันทึกไม่สำเร็จ"));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="wrap">
+      <div className="card">
+        <h2>📝 บันทึกข้อมูลยางเก่า</h2>
+
+        <label>สาขา <span className="req">*</span></label>
+        <select value={f.branch} onChange={e=>set("branch",e.target.value)}>
+          <option value="">— เลือกสาขา —</option>
+          {BRANCHES.map(b => <option key={b} value={b}>สาขา {b}</option>)}
+        </select>
+
+        <label>วันที่บันทึก (อัตโนมัติ)</label>
+        <input type="date" value={f.record_date} onChange={e=>set("record_date",e.target.value)} />
+
+        <div className="grid2">
+          <div>
+            <label>ขนาดยาง <span className="req">*</span></label>
+            <input placeholder="เช่น 185/60R15" value={f.tire_size} onChange={e=>set("tire_size",e.target.value)} />
+          </div>
+          <div>
+            <label>ยี่ห้อยาง</label>
+            <input placeholder="เช่น Bridgestone" value={f.brand} onChange={e=>set("brand",e.target.value)} />
+          </div>
+        </div>
+
+        <label>จำนวนรับเข้าสต็อกยางเก่า</label>
+        <input type="number" inputMode="numeric" min="0" value={f.qty_received} onChange={e=>set("qty_received",e.target.value)} />
+
+        <div className="grid2">
+          <div>
+            <label>เข้าสต็อกยางดี</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_good} onChange={e=>set("qty_good",e.target.value)} />
+          </div>
+          <div>
+            <label>เข้าสต็อกยางเสีย</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_bad} onChange={e=>set("qty_bad",e.target.value)} />
+          </div>
+        </div>
+
+        <label>จำนวนที่ลูกค้านำกลับ</label>
+        <input type="number" inputMode="numeric" min="0" value={f.qty_customer_back} onChange={e=>set("qty_customer_back",e.target.value)} />
+
+        <div className="grid2">
+          <div>
+            <label>ผู้รับเหมายางดีซื้อออก</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_sold_good} onChange={e=>set("qty_sold_good",e.target.value)} />
+          </div>
+          <div>
+            <label>ผู้รับเหมายางเสียซื้อออก</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_sold_bad} onChange={e=>set("qty_sold_bad",e.target.value)} />
+          </div>
+        </div>
+
+        <label>จำนวนยางดีที่ถูกปฏิเสธ (ไม่ถูกซื้อ)</label>
+        <input type="number" inputMode="numeric" min="0" value={f.qty_rejected} onChange={e=>set("qty_rejected",e.target.value)} />
+
+        {hasReject && (
+          <>
+            <div className="note">⚠️ ยางดีที่ถูกปฏิเสธ {n(f.qty_rejected)} เส้น จะถูกย้ายเข้าสต็อก<b>ยางเสีย</b>อัตโนมัติ</div>
+            <label>หมายเหตุ เหตุผลที่ไม่รับซื้อ</label>
+            <textarea placeholder="เช่น ดอกยางต่างกัน, ยี่ห้อไม่ตรง, สภาพไม่ผ่านเกณฑ์..." value={f.reject_note} onChange={e=>set("reject_note",e.target.value)} />
+            <label>รูปถ่ายยางดีที่ไม่ถูกซื้อ (สูงสุด 4 รูป)</label>
+            <label className="photo-input">
+              📷 {files.length ? `เลือกแล้ว ${files.length} รูป` : "แตะเพื่อถ่าย / เลือกรูป"}
+              <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={onPickFiles} />
+            </label>
+            {files.length>0 && (
+              <div className="thumbs">
+                {files.map((file,i)=>(
+                  <img key={i} src={URL.createObjectURL(file)} alt="" />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{marginTop:16}}>
+          <button className="btn" disabled={saving} onClick={submit}>
+            {saving ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function Dashboard({ records }){
+  const months = useMemo(()=>{
+    const s = new Set(records.map(r=>r.month_key));
+    return Array.from(s).sort().reverse();
+  }, [records]);
+  const [branch, setBranch] = useState("");
+  const [month, setMonth] = useState("");
+
+  useEffect(()=>{ if(months.length && !month) setMonth(months[0]); }, [months]);
+
+  const filtered = records.filter(r =>
+    (!branch || r.branch===branch) && (!month || r.month_key===month)
+  );
+
+  const agg = useMemo(()=>{
+    let goodRemain=0, badRemain=0, soldGood=0, soldBad=0, back=0, rejected=0, received=0;
+    filtered.forEach(r=>{
+      const c = calc(r);
+      goodRemain += c.goodRemain; badRemain += c.badRemain;
+      soldGood += n(r.qty_sold_good); soldBad += n(r.qty_sold_bad);
+      back += n(r.qty_customer_back); rejected += n(r.qty_rejected);
+      received += n(r.qty_received);
+    });
+    return { total: goodRemain+badRemain, goodRemain, badRemain, soldGood, soldBad, back, rejected, received };
+  }, [filtered]);
+
+  const Box = ({v,l,c}) => (
+    <div className="stat" style={{background:c}}>
+      <div className="v">{fmt(v)}</div><div className="l">{l}</div>
+    </div>
+  );
+
+  return (
+    <div className="wrap">
+      <div className="card">
+        <h2>📊 แดชบอร์ดสาขา</h2>
+        <div className="filterbar">
+          <div>
+            <label style={{margin:"0 0 4px"}}>สาขา</label>
+            <select value={branch} onChange={e=>setBranch(e.target.value)}>
+              <option value="">ทุกสาขา</option>
+              {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>เดือน</label>
+            <select value={month} onChange={e=>setMonth(e.target.value)}>
+              <option value="">ทุกเดือน</option>
+              {months.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="stat-grid">
+          <Box v={agg.total}     l="ยางเก่าคงเหลือทั้งหมด" c="#111827" />
+          <Box v={agg.received}  l="รับเข้ายางเก่ารวม" c="#475569" />
+          <Box v={agg.goodRemain} l="ยางเก่าสภาพดี (คงเหลือ)" c="var(--good)" />
+          <Box v={agg.badRemain}  l="ยางเก่าสภาพเสีย (คงเหลือ)" c="var(--bad)" />
+          <Box v={agg.soldGood}  l="ขายผู้รับเหมายางดี" c="var(--blue)" />
+          <Box v={agg.soldBad}   l="ขายผู้รับเหมายางเสีย" c="var(--purple)" />
+          <Box v={agg.back}      l="ลูกค้านำกลับ" c="var(--amber)" />
+          <Box v={agg.rejected}  l="ยางดีที่ถูกปฏิเสธ" c="#be123c" />
+        </div>
+        <div className="small" style={{marginTop:12, lineHeight:1.5}}>
+          * คงเหลือยางดี = เข้ายางดี − ขายผู้รับเหมายางดี − ถูกปฏิเสธ<br/>
+          * คงเหลือยางเสีย = เข้ายางเสีย + ถูกปฏิเสธ − ขายผู้รับเหมายางเสีย
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   RECORDS LIST + DELETE BY MONTH
+   ============================================================ */
+function RecordsList({ records, reload, toast }){
+  const [branch, setBranch] = useState("");
+  const [month, setMonth] = useState("");
+  const [lightbox, setLightbox] = useState(null);
+
+  const months = useMemo(()=>{
+    const s = new Set(records.map(r=>r.month_key));
+    return Array.from(s).sort().reverse();
+  }, [records]);
+
+  const filtered = records.filter(r =>
+    (!branch || r.branch===branch) && (!month || r.month_key===month)
+  );
+
+  const monthSummary = useMemo(()=>{
+    const map = {};
+    records.forEach(r=>{ map[r.month_key]=(map[r.month_key]||0)+1; });
+    return Object.entries(map).sort((a,b)=> a[0]<b[0]?1:-1);
+  }, [records]);
+
+  const deleteMonth = async (mk, count) => {
+    if (!supa) return;
+    if (!confirm(`ลบข้อมูลทั้งหมดของ ${monthThai(mk)} จำนวน ${count} รายการ?\n(ลบรูปถ่ายในเดือนนี้ด้วย — กู้คืนไม่ได้)`)) return;
+    try {
+      const recs = records.filter(r=>r.month_key===mk);
+      const paths = recs.flatMap(r => (r.reject_photos||[]).map(p=>p.path)).filter(Boolean);
+      if (paths.length) await supa.storage.from(BUCKET).remove(paths);
+      const { error } = await supa.from(TABLE).delete().eq("month_key", mk);
+      if (error) throw error;
+      toast("ลบเดือน "+monthThai(mk)+" แล้ว");
+      reload();
+    } catch(err){ console.error(err); toast("ลบไม่สำเร็จ: "+(err.message||"")); }
+  };
+
+  return (
+    <div className="wrap">
+      <div className="card">
+        <h2>🗂️ จัดการข้อมูลรายเดือน</h2>
+        {monthSummary.length===0
+          ? <div className="empty">ยังไม่มีข้อมูล</div>
+          : monthSummary.map(([mk,c])=>(
+            <div className="monthrow" key={mk}>
+              <div><b>{monthThai(mk)}</b> <span className="badge">{c} รายการ</span></div>
+              <button className="btn danger" style={{width:"auto", padding:"8px 16px"}} onClick={()=>deleteMonth(mk,c)}>🗑 ลบ</button>
+            </div>
+          ))
+        }
+      </div>
+
+      <div className="card">
+        <h2>📋 ข้อมูลที่บันทึก</h2>
+        <div className="filterbar">
+          <select value={branch} onChange={e=>setBranch(e.target.value)}>
+            <option value="">ทุกสาขา</option>
+            {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+          </select>
+          <select value={month} onChange={e=>setMonth(e.target.value)}>
+            <option value="">ทุกเดือน</option>
+            {months.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
+          </select>
+        </div>
+
+        {filtered.length===0
+          ? <div className="empty">ไม่พบรายการ</div>
+          : filtered.map(r=>{
+            const c = calc(r);
+            return (
+              <div className="rec" key={r.id}>
+                <div className="top">
+                  <div>
+                    <div className="size">{r.tire_size} <span className="small">{r.brand}</span></div>
+                    <div className="meta">สาขา {r.branch} · {r.record_date}</div>
+                  </div>
+                  <span className="pill" style={{background:"#f3f4f6", color:"#374151"}}>คงเหลือ {fmt(c.totalRemain)}</span>
+                </div>
+                <table>
+                  <tbody>
+                    <tr><td>รับเข้ายางเก่า</td><td>{fmt(n(r.qty_received))}</td></tr>
+                    <tr><td>เข้ายางดี / เข้ายางเสีย</td><td>{fmt(n(r.qty_good))} / {fmt(n(r.qty_bad))}</td></tr>
+                    <tr><td>ลูกค้านำกลับ</td><td>{fmt(n(r.qty_customer_back))}</td></tr>
+                    <tr><td>ขายผู้รับเหมา ดี / เสีย</td><td>{fmt(n(r.qty_sold_good))} / {fmt(n(r.qty_sold_bad))}</td></tr>
+                    <tr><td style={{color:"var(--bad)"}}>ยางดีถูกปฏิเสธ → ย้ายเข้ายางเสีย</td><td style={{color:"var(--bad)"}}>{fmt(n(r.qty_rejected))}</td></tr>
+                    <tr><td>คงเหลือ ดี / เสีย</td><td>{fmt(c.goodRemain)} / {fmt(c.badRemain)}</td></tr>
+                  </tbody>
+                </table>
+                {r.reject_note && <div className="note">หมายเหตุ: {r.reject_note}</div>}
+                {(r.reject_photos||[]).length>0 && (
+                  <div className="thumbs">
+                    {r.reject_photos.map((p,i)=>(
+                      <img key={i} src={p.url} alt="" onClick={()=>setLightbox(p.url)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        }
+      </div>
+
+      {lightbox && (
+        <div className="lightbox" onClick={()=>setLightbox(null)}>
+          <div className="x">×</div>
+          <img src={lightbox} alt="" onClick={e=>e.stopPropagation()} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   ADMIN EXPORT
+   ============================================================ */
+function Admin({ records, toast }){
+  const months = useMemo(()=>{
+    const s = new Set(records.map(r=>r.month_key));
+    return Array.from(s).sort().reverse();
+  }, [records]);
+  const [branch, setBranch] = useState("");
+  const [month, setMonth] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const filtered = records.filter(r=>{
+    if (branch && r.branch!==branch) return false;
+    if (month && r.month_key!==month) return false;
+    if (from && r.record_date < from) return false;
+    if (to && r.record_date > to) return false;
+    return true;
+  });
+
+  const exportExcel = () => {
+    if (!filtered.length){ toast("ไม่มีข้อมูลให้ส่งออก"); return; }
+    const rows = filtered.map(r=>{
+      const c = calc(r);
+      return {
+        "วันที่": r.record_date,
+        "สาขา": r.branch,
+        "ขนาดยาง": r.tire_size,
+        "ยี่ห้อ": r.brand,
+        "รับเข้ายางเก่า": n(r.qty_received),
+        "เข้าสต็อกยางดี": n(r.qty_good),
+        "เข้าสต็อกยางเสีย": n(r.qty_bad),
+        "ลูกค้านำกลับ": n(r.qty_customer_back),
+        "ขายผู้รับเหมายางดี": n(r.qty_sold_good),
+        "ขายผู้รับเหมายางเสีย": n(r.qty_sold_bad),
+        "ยางดีถูกปฏิเสธ": n(r.qty_rejected),
+        "คงเหลือยางดี": c.goodRemain,
+        "คงเหลือยางเสีย": c.badRemain,
+        "คงเหลือรวม": c.totalRemain,
+        "หมายเหตุ": r.reject_note || "",
+        "จำนวนรูป": (r.reject_photos||[]).length,
+        "ลิงก์รูป": (r.reject_photos||[]).map(p=>p.url).join(" , ")
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = Object.keys(rows[0]).map(k=>({ wch: Math.max(12, k.length+2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายงานยางเก่า");
+    const tag = [branch||"ทุกสาขา", month||"ทุกเดือน"].join("_");
+    XLSX.writeFile(wb, `รายงานยางเก่า_${tag}_${todayStr()}.xlsx`);
+    toast("ส่งออก Excel แล้ว ✓");
+  };
+
+  return (
+    <div className="wrap">
+      <div className="card">
+        <h2>⚙️ แอดมิน — ส่งออกรายงาน Excel</h2>
+        <div className="filterbar">
+          <div>
+            <label style={{margin:"0 0 4px"}}>สาขา</label>
+            <select value={branch} onChange={e=>setBranch(e.target.value)}>
+              <option value="">ทุกสาขา</option>
+              {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>เดือน</label>
+            <select value={month} onChange={e=>setMonth(e.target.value)}>
+              <option value="">ทุกเดือน</option>
+              {months.map(m=><option key={m} value={m}>{monthThai(m)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>ตั้งแต่วันที่</label>
+            <input type="date" value={from} onChange={e=>setFrom(e.target.value)} />
+          </div>
+          <div>
+            <label style={{margin:"0 0 4px"}}>ถึงวันที่</label>
+            <input type="date" value={to} onChange={e=>setTo(e.target.value)} />
+          </div>
+        </div>
+        <div className="row-between" style={{marginBottom:12}}>
+          <span className="small">พบ {filtered.length} รายการ ตามเงื่อนไข</span>
+          <button className="btn outline" style={{width:"auto", padding:"8px 14px"}}
+            onClick={()=>{ setBranch(""); setMonth(""); setFrom(""); setTo(""); }}>ล้างตัวกรอง</button>
+        </div>
+        <button className="btn green" onClick={exportExcel}>📥 ดาวน์โหลดไฟล์ Excel</button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   APP
+   ============================================================ */
+function App(){
+  const [tab, setTab] = useState("form");
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, toastNode] = useToast();
+
+  const reload = useCallback(async ()=>{
+    if (!supa){ setLoading(false); return; }
+    setLoading(true);
+    const { data, error } = await supa.from(TABLE).select("*").order("record_date",{ascending:false}).order("created_at",{ascending:false});
+    if (error){ console.error(error); toast("โหลดข้อมูลผิดพลาด"); }
+    setRecords(data || []);
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(()=>{ reload(); }, [reload]);
+
+  const tabs = [
+    { k:"form",  ic:"📝", l:"บันทึก" },
+    { k:"dash",  ic:"📊", l:"แดชบอร์ด" },
+    { k:"list",  ic:"📋", l:"รายการ" },
+    { k:"admin", ic:"⚙️", l:"แอดมิน" },
+  ];
+
+  return (
+    <div className="app">
+      <header>
+        <h1>🛞 ระบบบันทึกยางเก่า ดี/เสีย</h1>
+        <div className="sub">COCKPIT · จัดการสต็อกยางเก่า 10 สาขา</div>
+      </header>
+
+      {!supa && (
+        <div className="banner">
+          ⚠️ <b>ยังไม่ได้ตั้งค่า Supabase</b><br/>
+          เปิดไฟล์ <code>index.html</code> แล้วใส่ค่า <code>SUPABASE_URL</code> และ <code>SUPABASE_ANON_KEY</code> ที่ส่วนบนของสคริปต์ จากนั้นรัน SQL ที่แนบมาเพื่อสร้างตารางและ Storage
+        </div>
+      )}
+
+      {loading && supa
+        ? <div className="empty" style={{paddingTop:40}}>กำลังโหลด...</div>
+        : (
+          <>
+            {tab==="form"  && <RecordForm onSaved={reload} toast={toast} />}
+            {tab==="dash"  && <Dashboard records={records} />}
+            {tab==="list"  && <RecordsList records={records} reload={reload} toast={toast} />}
+            {tab==="admin" && <Admin records={records} toast={toast} />}
+          </>
+        )
+      }
+
+      <nav className="navbar">
+        {tabs.map(t=>(
+          <button key={t.k} className={tab===t.k?"active":""} onClick={()=>setTab(t.k)}>
+            <span className="ic">{t.ic}</span><span>{t.l}</span>
+          </button>
+        ))}
+      </nav>
+
+      {toastNode}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
