@@ -1155,6 +1155,8 @@ function Admin({ lots, toast, deposits, lockedBranch }){
       "เบอร์โทร": d.phone || "",
       "ทะเบียนรถ": d.plate_number,
       "จังหวัด": d.plate_province,
+      "ขนาดยาง": d.tire_size || "",
+      "ยี่ห้อ": d.brand || "",
       "จำนวนเส้น": n(d.qty),
       "สถานะ": depositStatusLabel(d.status),
       "วันที่มารับ": d.pickup_date || "",
@@ -1293,7 +1295,7 @@ const DEPOSIT_TABLE = "tire_deposits";
 function DepositForm({ onSaved, toast, defaultBranch, lockedBranch }){
   const blank = {
     branch: lockedBranch || defaultBranch || "", deposit_date: todayStr(),
-    customer_name:"", phone:"", plate_number:"", plate_province:"", qty:"", note:""
+    customer_name:"", phone:"", plate_number:"", plate_province:"", tire_size:"", brand:"", qty:"", note:""
   };
   const [f, setF] = useState(blank);
   const [files, setFiles] = useState([]);
@@ -1330,6 +1332,8 @@ function DepositForm({ onSaved, toast, defaultBranch, lockedBranch }){
         phone: f.phone.trim(),
         plate_number: f.plate_number.trim(),
         plate_province: f.plate_province.trim(),
+        tire_size: f.tire_size.trim(),
+        brand: f.brand.trim(),
         qty: n(f.qty),
         deposit_photos: photos,
         status: "deposited",
@@ -1365,6 +1369,17 @@ function DepositForm({ onSaved, toast, defaultBranch, lockedBranch }){
 
       <label>เบอร์โทร</label>
       <input type="tel" inputMode="numeric" placeholder="08xxxxxxxx" value={f.phone} onChange={e=>set("phone",e.target.value)} />
+
+      <div className="grid2">
+        <div>
+          <label>ขนาดยาง</label>
+          <input placeholder="เช่น 185/60R15" value={f.tire_size} onChange={e=>set("tire_size",e.target.value)} />
+        </div>
+        <div>
+          <label>ยี่ห้อยาง</label>
+          <input placeholder="เช่น Bridgestone" value={f.brand} onChange={e=>set("brand",e.target.value)} />
+        </div>
+      </div>
 
       <div className="grid2">
         <div>
@@ -1481,8 +1496,8 @@ function ConvertDepositModal({ deposit, onClose, onDone, toast }){
     record_date: todayStr(),
     month_key: monthKeyOf(todayStr()),
     branch: deposit.branch,
-    tire_size: `ยางฝากไม่มารับ (${deposit.plate_number})`,
-    brand: deposit.customer_name,
+    tire_size: deposit.tire_size && deposit.tire_size.trim() ? deposit.tire_size : `ยางฝากไม่มารับ (${deposit.plate_number})`,
+    brand: deposit.brand && deposit.brand.trim() ? deposit.brand : deposit.customer_name,
     qty_total_intake: qty,
     qty_customer_back: 0,
     qty_received: qty,
@@ -1535,6 +1550,9 @@ function ConvertDepositModal({ deposit, onClose, onDone, toast }){
       <div className="modal-sheet" onClick={e=>e.stopPropagation()}>
         <h3>📦 ย้ายเข้าสต็อก — {deposit.customer_name}</h3>
         <div className="small">{deposit.plate_number} · {deposit.plate_province} · ฝากไว้ {fmt(deposit.qty)} เส้น เมื่อ {deposit.deposit_date}</div>
+        {(deposit.tire_size || deposit.brand) && (
+          <div className="small">{deposit.tire_size}{deposit.tire_size && deposit.brand ? " · " : ""}{deposit.brand}</div>
+        )}
         <div className="note">ลูกค้าไม่มารับยางที่ฝากไว้ ยางจะถูกย้ายเข้าสต็อกยางเก่าของสาขา</div>
 
         {mode === "pick" ? (
@@ -1587,7 +1605,7 @@ function PickupStage({ deposits, reload, toast }){
         <div className="lotcard" key={d.id}>
           <div className="top">
             <div>
-              <div className="size">{d.customer_name}</div>
+              <div className="size">{d.customer_name}{d.tire_size ? <span className="small"> · {d.tire_size}</span> : ""}{d.brand ? <span className="small"> ({d.brand})</span> : ""}</div>
               <div className="meta">{d.plate_number} · {d.plate_province} · สาขา {d.branch}</div>
               <div className="meta">ฝากเมื่อ {d.deposit_date}{d.phone ? " · โทร "+d.phone : ""}</div>
             </div>
@@ -1707,7 +1725,7 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
           <div className="rec" key={d.id}>
             <div className="top">
               <div>
-                <div className="size">{d.customer_name}</div>
+                <div className="size">{d.customer_name}{d.tire_size ? <span className="small"> · {d.tire_size}</span> : ""}{d.brand ? <span className="small"> ({d.brand})</span> : ""}</div>
                 <div className="meta">{d.plate_number} · {d.plate_province} · สาขา {d.branch}</div>
               </div>
               <span className={"status-badge "+(d.status==="deposited"?"sb-bad_pending":d.status==="picked_up"?"sb-good_done":"sb-received")}>
@@ -1719,6 +1737,8 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
             </div>
             <table>
               <tbody>
+                {d.tire_size && <tr><td>ขนาดยาง</td><td>{d.tire_size}</td></tr>}
+                {d.brand && <tr><td>ยี่ห้อ</td><td>{d.brand}</td></tr>}
                 <tr><td>จำนวนที่ฝาก</td><td>{fmt(d.qty)} เส้น</td></tr>
                 <tr><td>วันที่ฝาก</td><td>{d.deposit_date}</td></tr>
                 {d.phone && <tr><td>เบอร์โทร</td><td>{d.phone}</td></tr>}
