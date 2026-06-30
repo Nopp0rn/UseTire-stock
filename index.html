@@ -219,6 +219,11 @@ const STATUS_LABEL = {
   sold_bad:"ขายให้ผู้รับเหมายางเสียแล้ว",
   no_stock:"ลูกค้านำกลับทั้งหมด (ไม่มีเข้าสต็อก)"
 };
+const ACTIVE_LOT_STATUSES = ["received","good_pending","bad_pending"];
+const HISTORY_LOT_STATUSES = ["good_done","sold_bad","no_stock"];
+const ACTIVE_DEPOSIT_STATUSES = ["deposited"];
+const HISTORY_DEPOSIT_STATUSES = ["picked_up","moved_to_stock"];
+const DEPOSIT_STATUS_LABEL = { deposited:"ฝากอยู่", picked_up:"รับคืนแล้ว", moved_to_stock:"ย้ายเข้าสต็อกแล้ว" };
 
 function compressImage(file, maxDim = 1280, quality = 0.7) {
   return new Promise((resolve, reject) => {
@@ -890,8 +895,156 @@ function Dashboard({ lots, deposits, lockedBranch }){
 /* ============================================================
    RECORDS LIST + DELETE BY MONTH
    ============================================================ */
+/* ============================================================
+   แก้ไขรายการยางเก่า (ใช้ได้ทุกสถานะ)
+   ============================================================ */
+function EditLotModal({ lot, onClose, onDone, toast }){
+  const [f, setF] = useState({
+    branch: lot.branch || "",
+    record_date: lot.record_date || todayStr(),
+    tire_size: lot.tire_size || "",
+    brand: lot.brand || "",
+    qty_total_intake: String(n(lot.qty_total_intake)),
+    qty_customer_back: String(n(lot.qty_customer_back)),
+    side: lot.side || "",
+    qty_sold_good: String(n(lot.qty_sold_good)),
+    qty_rejected: String(n(lot.qty_rejected)),
+    qty_sold_bad: String(n(lot.qty_sold_bad)),
+    reject_note: lot.reject_note || ""
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k,v) => setF(p => ({...p, [k]:v}));
+
+  const netReceived = Math.max(0, n(f.qty_total_intake) - n(f.qty_customer_back));
+  const usedGood = n(f.qty_sold_good) + n(f.qty_rejected);
+  const usedBad = n(f.qty_sold_bad);
+  const overGood = f.side === "good" && usedGood > netReceived;
+  const overBad = f.side === "bad" && usedBad > netReceived;
+
+  const submit = async () => {
+    if (!f.branch) { toast("กรุณาเลือกสาขา"); return; }
+    if (!f.tire_size.trim()) { toast("กรุณากรอกขนาดยาง"); return; }
+    if (n(f.qty_customer_back) > n(f.qty_total_intake)) { toast("จำนวนนำกลับมากกว่าจำนวนที่รับทั้งหมด — กรุณาแก้ตัวเลข"); return; }
+    if (overGood) { toast(`รวมรับซื้อ+ปฏิเสธ (${fmt(usedGood)}) มากกว่าจำนวนสุทธิ (${fmt(netReceived)})`); return; }
+    if (overBad) { toast(`จำนวนที่ผู้รับเหมาเสียรับไป (${fmt(usedBad)}) มากกว่าจำนวนสุทธิ (${fmt(netReceived)})`); return; }
+
+    let status;
+    if (netReceived <= 0) status = "no_stock";
+    else if (f.side === "good") status = usedGood >= netReceived ? "good_done" : "good_pending";
+    else if (f.side === "bad") status = usedBad >= netReceived ? "sold_bad" : "bad_pending";
+    else status = "received";
+
+    setSaving(true);
+    try {
+      const { error } = await supa.from(TABLE).update({
+        branch: f.branch,
+        record_date: f.record_date,
+        month_key: monthKeyOf(f.record_date),
+        tire_size: f.tire_size.trim(),
+        brand: f.brand.trim(),
+        qty_total_intake: n(f.qty_total_intake),
+        qty_customer_back: n(f.qty_customer_back),
+        qty_received: netReceived,
+        side: f.side || null,
+        qty_sold_good: f.side === "good" ? n(f.qty_sold_good) : 0,
+        qty_rejected: f.side === "good" ? n(f.qty_rejected) : 0,
+        qty_sold_bad: f.side === "bad" ? n(f.qty_sold_bad) : 0,
+        reject_note: f.reject_note.trim(),
+        status
+      }).eq("id", lot.id);
+      if (error) throw error;
+      toast("แก้ไขข้อมูลแล้ว ✓");
+      onDone();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-sheet" onClick={e=>e.stopPropagation()}>
+        <h3>✏️ แก้ไขรายการ</h3>
+
+        <label>สาขา <span className="req">*</span></label>
+        <select value={f.branch} onChange={e=>set("branch",e.target.value)}>
+          <option value="">— เลือกสาขา —</option>
+          {BRANCHES.map(b => <option key={b} value={b}>สาขา {b}</option>)}
+        </select>
+
+        <label>วันที่รับเข้า</label>
+        <input type="date" value={f.record_date} onChange={e=>set("record_date",e.target.value)} />
+
+        <div className="grid2">
+          <div>
+            <label>ขนาดยาง <span className="req">*</span></label>
+            <input value={f.tire_size} onChange={e=>set("tire_size",e.target.value)} />
+          </div>
+          <div>
+            <label>ยี่ห้อยาง</label>
+            <input value={f.brand} onChange={e=>set("brand",e.target.value)} />
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div>
+            <label>รับจากลูกค้าทั้งหมด</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_total_intake} onChange={e=>set("qty_total_intake",e.target.value)} />
+          </div>
+          <div>
+            <label>ลูกค้านำกลับ</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_customer_back} onChange={e=>set("qty_customer_back",e.target.value)} />
+          </div>
+        </div>
+        <div className="note" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
+          จำนวนสุทธิเข้าสต็อก = {fmt(netReceived)} เส้น
+        </div>
+
+        <label>ฝั่ง</label>
+        <select value={f.side} onChange={e=>set("side",e.target.value)}>
+          <option value="">ยังไม่แยก (รอแยกดี/เสีย)</option>
+          <option value="good">ยางดี</option>
+          <option value="bad">ยางเสีย</option>
+        </select>
+
+        {f.side === "good" && (
+          <div className="grid2">
+            <div>
+              <label>ผู้รับเหมายางดีรับซื้อ</label>
+              <input type="number" inputMode="numeric" min="0" value={f.qty_sold_good} onChange={e=>set("qty_sold_good",e.target.value)} />
+            </div>
+            <div>
+              <label>ผู้รับเหมายางดีปฏิเสธ</label>
+              <input type="number" inputMode="numeric" min="0" value={f.qty_rejected} onChange={e=>set("qty_rejected",e.target.value)} />
+            </div>
+          </div>
+        )}
+        {overGood && <div className="note">⚠️ รวมรับซื้อ+ปฏิเสธ เกินจำนวนสุทธิ ({fmt(netReceived)} เส้น)</div>}
+
+        {f.side === "bad" && (
+          <>
+            <label>ผู้รับเหมายางเสียรับไปแล้ว</label>
+            <input type="number" inputMode="numeric" min="0" value={f.qty_sold_bad} onChange={e=>set("qty_sold_bad",e.target.value)} />
+          </>
+        )}
+        {overBad && <div className="note">⚠️ จำนวนที่รับไปเกินจำนวนสุทธิ ({fmt(netReceived)} เส้น)</div>}
+
+        <label>หมายเหตุ</label>
+        <textarea value={f.reject_note} onChange={e=>set("reject_note",e.target.value)} />
+
+        <div className="small" style={{marginTop:6}}>หมายเหตุ: การแก้ไขนี้ไม่รวมรูปถ่าย (ใช้รูปเดิมที่เคยถ่ายไว้)</div>
+
+        <div className="grid2" style={{marginTop:16}}>
+          <button className="btn outline" onClick={onClose}>ยกเลิก</button>
+          <button className="btn" disabled={saving} onClick={submit}>{saving?"กำลังบันทึก...":"บันทึกการแก้ไข"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBranch }){
   const [dataset, setDataset] = useState("lots"); // lots | deposits
+  const [view, setView] = useState("active"); // active | history
   const [localBranch, setLocalBranch] = useState("");
   const branch = lockedBranch || localBranch;
   const [month, setMonth] = useState("");
@@ -900,6 +1053,10 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [lightbox, setLightbox] = useState(null);
+  const [editing, setEditing] = useState(null);
+
+  const viewStatuses = view === "active" ? ACTIVE_LOT_STATUSES : HISTORY_LOT_STATUSES;
+  const statusOptions = Object.entries(STATUS_LABEL).filter(([k])=>viewStatuses.includes(k));
 
   const months = useMemo(()=>{
     const s = new Set(lots.map(l=>l.month_key));
@@ -907,10 +1064,14 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
   }, [lots]);
 
   const filtered = lots.filter(l =>
+    viewStatuses.includes(l.status) &&
     (!branch || l.branch===branch) && (!month || l.month_key===month) && (!status || l.status===status) &&
     (!origin || (origin==="rejected" ? !!l.parent_lot_id : !!l.from_deposit_id)) &&
     (!from || l.record_date >= from) && (!to || l.record_date <= to)
   );
+
+  const activeCount = lots.filter(l=>ACTIVE_LOT_STATUSES.includes(l.status)).length;
+  const historyCount = lots.filter(l=>HISTORY_LOT_STATUSES.includes(l.status)).length;
 
   const monthSummary = useMemo(()=>{
     const map = {};
@@ -956,6 +1117,15 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
         <DepositList deposits={deposits} reload={reloadDeposits} toast={toast} lockedBranch={lockedBranch} />
       ) : (
       <>
+      <div className="seg">
+        <button className={view==="active"?"active":""} onClick={()=>{ setView("active"); setStatus(""); }}>
+          🔵 ใช้งานอยู่<span className="cnt">{activeCount}</span>
+        </button>
+        <button className={view==="history"?"active":""} onClick={()=>{ setView("history"); setStatus(""); }}>
+          📜 ประวัติ<span className="cnt">{historyCount}</span>
+        </button>
+      </div>
+
       <div className="card">
         <h2>🗂️ จัดการข้อมูลรายเดือน</h2>
         {monthSummary.length===0
@@ -983,8 +1153,8 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
         </div>
         <div className="filterbar" style={{marginBottom:12}}>
           <select value={status} onChange={e=>setStatus(e.target.value)}>
-            <option value="">ทุกสถานะ</option>
-            {Object.entries(STATUS_LABEL).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+            <option value="">ทุกสถานะ ({view==="active"?"ใช้งานอยู่":"ประวัติ"})</option>
+            {statusOptions.map(([k,l])=><option key={k} value={k}>{l}</option>)}
           </select>
           <select value={origin} onChange={e=>setOrigin(e.target.value)}>
             <option value="">ทุกแหล่งที่มา</option>
@@ -1017,6 +1187,7 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
                 <span className={"status-badge sb-"+l.status}>{STATUS_LABEL[l.status]}</span>
               </div>
               <div style={{textAlign:"right", marginTop:6}}>
+                <button className="linkbtn" onClick={()=>setEditing(l)}>✏️ แก้ไข</button>
                 <button className="linkbtn" style={{color:"var(--bad)"}} onClick={()=>deleteOne(l)}>🗑 ลบรายการนี้</button>
               </div>
               <table>
@@ -1054,6 +1225,9 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
           <div className="x">×</div>
           <img src={lightbox} alt="" onClick={e=>e.stopPropagation()} />
         </div>
+      )}
+      {editing && (
+        <EditLotModal lot={editing} toast={toast} onClose={()=>setEditing(null)} onDone={()=>{ setEditing(null); reload(); }} />
       )}
       </>
       )}
@@ -1631,18 +1805,151 @@ function PickupStage({ deposits, reload, toast }){
   );
 }
 
+/* ============================================================
+   แก้ไขรายการฝากยาง (ใช้ได้ทุกสถานะ)
+   ============================================================ */
+function EditDepositModal({ deposit, onClose, onDone, toast }){
+  const [f, setF] = useState({
+    branch: deposit.branch || "",
+    deposit_date: deposit.deposit_date || todayStr(),
+    customer_name: deposit.customer_name || "",
+    phone: deposit.phone || "",
+    plate_number: deposit.plate_number || "",
+    plate_province: deposit.plate_province || "",
+    tire_size: deposit.tire_size || "",
+    brand: deposit.brand || "",
+    qty: String(n(deposit.qty)),
+    status: deposit.status || "deposited",
+    pickup_date: deposit.pickup_date || todayStr(),
+    note: deposit.note || ""
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k,v) => setF(p => ({...p, [k]:v}));
+
+  const submit = async () => {
+    if (!f.branch) { toast("กรุณาเลือกสาขา"); return; }
+    if (!f.customer_name.trim()) { toast("กรุณากรอกชื่อลูกค้า"); return; }
+    if (!f.plate_number.trim()) { toast("กรุณากรอกทะเบียนรถ"); return; }
+    if (!f.plate_province.trim()) { toast("กรุณากรอกจังหวัด"); return; }
+    if (n(f.qty) <= 0) { toast("กรุณากรอกจำนวนเส้นที่ฝาก"); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        branch: f.branch,
+        deposit_date: f.deposit_date,
+        month_key: monthKeyOf(f.deposit_date),
+        customer_name: f.customer_name.trim(),
+        phone: f.phone.trim(),
+        plate_number: f.plate_number.trim(),
+        plate_province: f.plate_province.trim(),
+        tire_size: f.tire_size.trim(),
+        brand: f.brand.trim(),
+        qty: n(f.qty),
+        status: f.status,
+        note: f.note.trim()
+      };
+      if (f.status === "picked_up") payload.pickup_date = f.pickup_date;
+      const { error } = await supa.from(DEPOSIT_TABLE).update(payload).eq("id", deposit.id);
+      if (error) throw error;
+      toast("แก้ไขข้อมูลแล้ว ✓");
+      onDone();
+    } catch(err){ console.error(err); toast("ผิดพลาด: "+(err.message||"")); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-sheet" onClick={e=>e.stopPropagation()}>
+        <h3>✏️ แก้ไขรายการฝากยาง</h3>
+
+        <label>สาขา <span className="req">*</span></label>
+        <select value={f.branch} onChange={e=>set("branch",e.target.value)}>
+          <option value="">— เลือกสาขา —</option>
+          {BRANCHES.map(b => <option key={b} value={b}>สาขา {b}</option>)}
+        </select>
+
+        <label>วันที่ฝาก</label>
+        <input type="date" value={f.deposit_date} onChange={e=>set("deposit_date",e.target.value)} />
+
+        <label>ชื่อลูกค้า <span className="req">*</span></label>
+        <input value={f.customer_name} onChange={e=>set("customer_name",e.target.value)} />
+
+        <label>เบอร์โทร</label>
+        <input type="tel" inputMode="numeric" value={f.phone} onChange={e=>set("phone",e.target.value)} />
+
+        <div className="grid2">
+          <div>
+            <label>ขนาดยาง</label>
+            <input value={f.tire_size} onChange={e=>set("tire_size",e.target.value)} />
+          </div>
+          <div>
+            <label>ยี่ห้อยาง</label>
+            <input value={f.brand} onChange={e=>set("brand",e.target.value)} />
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div>
+            <label>ทะเบียนรถ <span className="req">*</span></label>
+            <input value={f.plate_number} onChange={e=>set("plate_number",e.target.value)} />
+          </div>
+          <div>
+            <label>จังหวัด <span className="req">*</span></label>
+            <input list="provinces-list" value={f.plate_province} onChange={e=>set("plate_province",e.target.value)} />
+          </div>
+        </div>
+
+        <label>จำนวนเส้นที่ฝาก <span className="req">*</span></label>
+        <input type="number" inputMode="numeric" min="0" value={f.qty} onChange={e=>set("qty",e.target.value)} />
+
+        <label>สถานะ</label>
+        <select value={f.status} onChange={e=>set("status",e.target.value)}>
+          <option value="deposited">ฝากอยู่</option>
+          <option value="picked_up">รับคืนแล้ว</option>
+          <option value="moved_to_stock">ย้ายเข้าสต็อกแล้ว</option>
+        </select>
+        {f.status === "picked_up" && (
+          <>
+            <label>วันที่มารับ</label>
+            <input type="date" value={f.pickup_date} onChange={e=>set("pickup_date",e.target.value)} />
+          </>
+        )}
+
+        <label>หมายเหตุ</label>
+        <textarea value={f.note} onChange={e=>set("note",e.target.value)} />
+
+        <div className="small" style={{marginTop:6}}>หมายเหตุ: การแก้ไขนี้ไม่รวมรูปถ่าย (ใช้รูปเดิมที่เคยถ่ายไว้)</div>
+
+        <div className="grid2" style={{marginTop:16}}>
+          <button className="btn outline" onClick={onClose}>ยกเลิก</button>
+          <button className="btn" disabled={saving} onClick={submit}>{saving?"กำลังบันทึก...":"บันทึกการแก้ไข"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DepositList({ deposits, reload, toast, lockedBranch }){
+  const [view, setView] = useState("active"); // active | history
   const [localBranch, setLocalBranch] = useState("");
   const branch = lockedBranch || localBranch;
   const [status, setStatus] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [lightbox, setLightbox] = useState(null);
+  const [editing, setEditing] = useState(null);
+
+  const viewStatuses = view === "active" ? ACTIVE_DEPOSIT_STATUSES : HISTORY_DEPOSIT_STATUSES;
+  const statusOptions = Object.entries(DEPOSIT_STATUS_LABEL).filter(([k])=>viewStatuses.includes(k));
 
   const filtered = deposits.filter(d =>
+    viewStatuses.includes(d.status) &&
     (!branch || d.branch===branch) && (!status || d.status===status) &&
     (!from || d.deposit_date >= from) && (!to || d.deposit_date <= to)
   );
+
+  const activeCount = deposits.filter(d=>ACTIVE_DEPOSIT_STATUSES.includes(d.status)).length;
+  const historyCount = deposits.filter(d=>HISTORY_DEPOSIT_STATUSES.includes(d.status)).length;
 
   const monthSummary = useMemo(()=>{
     const map = {};
@@ -1679,6 +1986,15 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
 
   return (
     <div>
+      <div className="seg">
+        <button className={view==="active"?"active":""} onClick={()=>{ setView("active"); setStatus(""); }}>
+          🔵 ใช้งานอยู่<span className="cnt">{activeCount}</span>
+        </button>
+        <button className={view==="history"?"active":""} onClick={()=>{ setView("history"); setStatus(""); }}>
+          📜 ประวัติ<span className="cnt">{historyCount}</span>
+        </button>
+      </div>
+
       <div className="card">
         <h2>🗂️ จัดการข้อมูลฝากยางรายเดือน</h2>
         {monthSummary.length===0
@@ -1699,10 +2015,8 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
             {BRANCHES.map(b=><option key={b} value={b}>สาขา {b}</option>)}
           </select>
           <select value={status} onChange={e=>setStatus(e.target.value)}>
-            <option value="">ทุกสถานะ</option>
-            <option value="deposited">ฝากอยู่</option>
-            <option value="picked_up">รับคืนแล้ว</option>
-            <option value="moved_to_stock">ย้ายเข้าสต็อกแล้ว</option>
+            <option value="">ทุกสถานะ ({view==="active"?"ใช้งานอยู่":"ประวัติ"})</option>
+            {statusOptions.map(([k,l])=><option key={k} value={k}>{l}</option>)}
           </select>
         </div>
         <div className="filterbar">
@@ -1733,6 +2047,7 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
               </span>
             </div>
             <div style={{textAlign:"right", marginTop:6}}>
+              <button className="linkbtn" onClick={()=>setEditing(d)}>✏️ แก้ไข</button>
               <button className="linkbtn" style={{color:"var(--bad)"}} onClick={()=>deleteOne(d)}>🗑 ลบรายการนี้</button>
             </div>
             <table>
@@ -1770,6 +2085,9 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
           <div className="x">×</div>
           <img src={lightbox} alt="" onClick={e=>e.stopPropagation()} />
         </div>
+      )}
+      {editing && (
+        <EditDepositModal deposit={editing} toast={toast} onClose={()=>setEditing(null)} onDone={()=>{ setEditing(null); reload && reload(); }} />
       )}
     </div>
   );
