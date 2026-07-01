@@ -812,35 +812,54 @@ function Dashboard({ lots, deposits, lockedBranch }){
 
   useEffect(()=>{ if(months.length && !month) setMonth(months[0]); }, [months]);
 
-  const filtered = lots.filter(l =>
-    (!branch || l.branch===branch) && (!month || l.month_key===month)
-  );
-  const filteredDeposits = deposits.filter(d =>
-    (!branch || d.branch===branch) && (!month || d.month_key===month)
-  );
+  // เส้น end-of-month ใช้เปรียบเทียบ record_date แบบ string YYYY-MM-DD
+  // ใช้ 99 เป็น day suffix เพราะสูงกว่าทุกวันในเดือน จึงครอบคลุมทุก date ในเดือนนั้น
+  const endOfMonthDate = month ? month + "-99" : "";
 
   const agg = useMemo(()=>{
-    let goodRemain=0, badRemain=0, waitingSort=0, soldGood=0, soldBad=0, back=0, rejected=0, total=0;
-    filtered.forEach(l=>{
-      back += n(l.qty_customer_back);
-      soldGood += n(l.qty_sold_good);   // สะสมทุกชุด แม้ยังตัดสินไม่ครบ
-      rejected += n(l.qty_rejected);    // สะสมทุกชุด แม้ยังตัดสินไม่ครบ
-      soldBad  += n(l.qty_sold_bad);    // สะสมทุกชุด แม้ยังรับไม่ครบ
-      if (l.status === "received")     waitingSort += n(l.qty_received);
-      if (l.status === "good_pending") goodRemain  += (n(l.qty_received) - n(l.qty_sold_good) - n(l.qty_rejected));
-      if (l.status === "bad_pending")  badRemain   += (n(l.qty_received) - n(l.qty_sold_bad));
+    let goodRemain=0, badRemain=0, waitingSort=0, back=0, rejected=0, total=0;
+    let soldGood=0, soldBad=0;
+
+    lots.forEach(l=>{
+      const matchBranch = !branch || l.branch===branch;
+      if (!matchBranch) return;
+
+      const isActive = ACTIVE_LOT_STATUSES.includes(l.status);
+      const isDone   = HISTORY_LOT_STATUSES.includes(l.status);
+
+      if (isActive){
+        // ยางที่ยังอยู่ในสต็อก: ยกยอดมาด้วยถ้ารับเข้าก่อนหรือในเดือนที่เลือก
+        if (month && l.record_date > endOfMonthDate) return;
+        back    += n(l.qty_customer_back);
+        soldGood += n(l.qty_sold_good);  // ส่วนที่ตัดสินไปแล้วบางส่วน
+        rejected += n(l.qty_rejected);   // ส่วนที่ถูกปฏิเสธไปแล้วบางส่วน
+        soldBad  += n(l.qty_sold_bad);   // ส่วนที่รับไปแล้วบางส่วน
+        if (l.status === "received")     waitingSort += n(l.qty_received);
+        if (l.status === "good_pending") goodRemain  += (n(l.qty_received) - n(l.qty_sold_good) - n(l.qty_rejected));
+        if (l.status === "bad_pending")  badRemain   += (n(l.qty_received) - n(l.qty_sold_bad));
+      } else if (isDone){
+        // ยางที่เสร็จงานแล้ว: นับเฉพาะเดือนที่เลือก (เป็นยอดกิจกรรมของเดือนนั้น)
+        if (month && l.month_key !== month) return;
+        back    += n(l.qty_customer_back);
+        soldGood += n(l.qty_sold_good);
+        rejected += n(l.qty_rejected);
+        soldBad  += n(l.qty_sold_bad);
+      }
     });
     total = waitingSort + goodRemain + badRemain;
     return { total, waitingSort, goodRemain, badRemain, soldGood, soldBad, back, rejected };
-  }, [filtered]);
+  }, [lots, branch, month, endOfMonthDate]);
 
+  // ยอดฝากยาง: ใช้ month_key เหมือนเดิม (ฝากอยู่ = ปัจจุบัน ไม่มีโจทย์ยกยอด)
   const depositAgg = useMemo(()=>{
     let remainingQty=0, pendingCount=0;
-    filteredDeposits.forEach(d=>{
+    deposits.forEach(d=>{
+      if (branch && d.branch!==branch) return;
+      if (month && d.month_key!==month) return;
       if (d.status === "deposited"){ remainingQty += n(d.qty); pendingCount += 1; }
     });
     return { remainingQty, pendingCount };
-  }, [filteredDeposits]);
+  }, [deposits, branch, month]);
 
   const Box = ({v,l,c}) => (
     <div className="stat" style={{background:c}}>
@@ -868,16 +887,19 @@ function Dashboard({ lots, deposits, lockedBranch }){
             </select>
           </div>
         </div>
+        {month && <div className="small" style={{marginBottom:10, color:"#6b7280"}}>
+          ยอดคงเหลือ (ดำ/เทา/เขียว/แดง) = รวมยกยอดจากเดือนก่อนหน้า · ยอดขาย/นำกลับ (น้ำเงิน/ม่วง/ส้ม/เข้ม) = เฉพาะเดือน {monthThai(month)}
+        </div>}
 
         <div className="stat-grid">
-          <Box v={agg.total}      l="ยางเก่าคงเหลือทั้งหมด" c="#111827" />
-          <Box v={agg.waitingSort} l="รอแยกดี/เสีย" c="#475569" />
-          <Box v={agg.goodRemain}  l="ยางเก่าสภาพดี (รอผู้รับเหมา)" c="var(--good)" />
-          <Box v={agg.badRemain}   l="ยางเก่าสภาพเสีย (รอผู้รับเหมา)" c="var(--bad)" />
-          <Box v={agg.soldGood}   l="ขายผู้รับเหมายางดีแล้ว" c="var(--blue)" />
-          <Box v={agg.soldBad}    l="ขายผู้รับเหมายางเสียแล้ว" c="var(--purple)" />
-          <Box v={agg.back}       l="ลูกค้านำกลับ" c="var(--amber)" />
-          <Box v={agg.rejected}   l="ผู้รับเหมายางดีปฏิเสธ" c="#be123c" />
+          <Box v={agg.total}       l="ยางเก่าคงเหลือทั้งหมด (ยกยอดรวม)" c="#111827" />
+          <Box v={agg.waitingSort}  l="รอแยกดี/เสีย (ยกยอดรวม)" c="#475569" />
+          <Box v={agg.goodRemain}   l="ยางเก่าสภาพดี (รอผู้รับเหมา)" c="var(--good)" />
+          <Box v={agg.badRemain}    l="ยางเก่าสภาพเสีย (รอผู้รับเหมา)" c="var(--bad)" />
+          <Box v={agg.soldGood}    l="ขายผู้รับเหมายางดีแล้ว" c="var(--blue)" />
+          <Box v={agg.soldBad}     l="ขายผู้รับเหมายางเสียแล้ว" c="var(--purple)" />
+          <Box v={agg.back}        l="ลูกค้านำกลับ" c="var(--amber)" />
+          <Box v={agg.rejected}    l="ผู้รับเหมายางดีปฏิเสธ" c="#be123c" />
         </div>
       </div>
 
