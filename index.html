@@ -2117,7 +2117,9 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
 
 function DepositScreen({ deposits, reload, toast, lockedBranch }){
   const [stage, setStage] = useState("new");
-  const pendingCount = deposits.filter(d=>d.status==="deposited").length;
+  const pendingCount = deposits.filter(d=>
+    d.status==="deposited" && (!lockedBranch || d.branch===lockedBranch)
+  ).length;
   const tabs = [
     { k:"new",  l:"ฝากใหม่" },
     { k:"pickup", l:"รอรับคืน", cnt: pendingCount },
@@ -2143,27 +2145,39 @@ function App(){
   const [tab, setTab] = useState("work");
   const [lots, setLots] = useState([]);
   const [deposits, setDeposits] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true); // แสดง spinner เฉพาะครั้งแรก
   const [toast, toastNode] = useToast();
-  const [lockedBranch, setLockedBranch] = useState(""); // ล็อกสาขาใช้ร่วมกันทุกหน้า (ป้องกันเลือกผิด)
+  const [lockedBranch, setLockedBranch] = useState("");
 
+  // โหลดครั้งแรก — แสดง spinner แค่ครั้งเดียว
+  useEffect(()=>{
+    if (!supa){ setInitialLoading(false); return; }
+    Promise.all([
+      supa.from(TABLE).select("*").order("record_date",{ascending:false}).order("created_at",{ascending:false}),
+      supa.from(DEPOSIT_TABLE).select("*").order("deposit_date",{ascending:false}).order("created_at",{ascending:false})
+    ]).then(([r1, r2])=>{
+      if (r1.data) setLots(r1.data);
+      if (r2.data) setDeposits(r2.data);
+      setInitialLoading(false);
+    }).catch(err=>{ console.error(err); setInitialLoading(false); });
+  }, []); // eslint-disable-line
+
+  // reload หลังบันทึกฟอร์ม — เงียบ ไม่มี loading spinner ไม่ unmount ฟอร์ม
   const reload = useCallback(async ()=>{
-    if (!supa){ setLoading(false); return; }
-    setLoading(true);
+    if (!supa) return;
     const { data, error } = await supa.from(TABLE).select("*").order("record_date",{ascending:false}).order("created_at",{ascending:false});
-    if (error){ console.error(error); toast("โหลดข้อมูลผิดพลาด"); }
-    setLots(data || []);
-    setLoading(false);
+    if (error){ console.error(error); toast("โหลดข้อมูลผิดพลาด"); return; }
+    if (data) setLots(data);
   }, [toast]);
 
   const reloadDeposits = useCallback(async ()=>{
     if (!supa) return;
     const { data, error } = await supa.from(DEPOSIT_TABLE).select("*").order("deposit_date",{ascending:false}).order("created_at",{ascending:false});
-    if (error){ console.error(error); toast("โหลดข้อมูลฝากยางผิดพลาด"); }
-    setDeposits(data || []);
+    if (error){ console.error(error); toast("โหลดข้อมูลฝากยางผิดพลาด"); return; }
+    if (data) setDeposits(data);
   }, [toast]);
 
-  // 🔇 Sync เบื้องหลัง — ไม่ตั้ง loading = true เพื่อป้องกันหน้าจอกระพริบ/ฟอร์มล้างตัวเอง
+  // Realtime sync เบื้องหลัง — เงียบ debounce 2 วินาที
   const silentSync = useCallback(async ()=>{
     if (!supa) return;
     const [r1, r2] = await Promise.all([
@@ -2174,23 +2188,21 @@ function App(){
     if (r2.data) setDeposits(r2.data);
   }, []);
 
-  useEffect(()=>{ reload(); reloadDeposits(); }, [reload, reloadDeposits]);
-
-  // 🔄 Realtime sync — ใช้ silentSync แทน reload ป้องกันหน้าจอกระพริบตอนพิมพ์ข้อมูล
   useEffect(()=>{
     if (!supa) return;
     let debounce = null;
-    // debounce 800ms กันกรณีมีหลาย event ยิงมาติดกัน (เช่น insert + update พร้อมกัน)
-    const onChanged = () => {
-      clearTimeout(debounce);
-      debounce = setTimeout(silentSync, 800);
-    };
+    const onChanged = () => { clearTimeout(debounce); debounce = setTimeout(silentSync, 2000); };
     const channel = supa.channel("tire-track-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "tire_lots" }, onChanged)
       .on("postgres_changes", { event: "*", schema: "public", table: "tire_deposits" }, onChanged)
       .subscribe();
     return () => { clearTimeout(debounce); supa.removeChannel(channel); };
   }, [silentSync]);
+
+  // ใช้ useMemo เพื่อป้องกัน WorkScreen/DepositScreen re-render ซ้ำเมื่อ lots ไม่เปลี่ยนจริง
+  const activeLots = useMemo(()=>
+    lots.filter(l=>ACTIVE_LOT_STATUSES.includes(l.status))
+  , [lots]);
 
   const tabs = [
     { k:"work",     ic:"📝", l:"บันทึก" },
@@ -2230,11 +2242,11 @@ function App(){
         </div>
       )}
 
-      {loading && supa
+      {initialLoading && supa
         ? <div className="empty" style={{paddingTop:40}}>กำลังโหลด...</div>
         : (
           <>
-            {tab==="work"    && <WorkScreen lots={lots} reload={reload} toast={toast} lockedBranch={lockedBranch} />}
+            {tab==="work"    && <WorkScreen lots={activeLots} reload={reload} toast={toast} lockedBranch={lockedBranch} />}
             {tab==="deposit" && <DepositScreen deposits={deposits} reload={reloadDeposits} toast={toast} lockedBranch={lockedBranch} />}
             {tab==="dash"    && <Dashboard lots={lots} deposits={deposits} lockedBranch={lockedBranch} />}
             {tab==="list"    && <RecordsList lots={lots} reload={reload} toast={toast} deposits={deposits} reloadDeposits={reloadDeposits} lockedBranch={lockedBranch} />}
