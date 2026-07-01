@@ -1790,10 +1790,10 @@ function ConvertDepositModal({ deposit, onClose, onDone, toast }){
   );
 }
 
-function PickupStage({ deposits, reload, toast }){
+function PickupStage({ deposits, reload, toast, lockedBranch }){
   const [active, setActive] = useState(null);
   const [converting, setConverting] = useState(null);
-  const pending = deposits.filter(d=>d.status==="deposited");
+  const pending = deposits.filter(d => d.status==="deposited" && (!lockedBranch || d.branch===lockedBranch));
   if (!pending.length) return <div className="empty">ไม่มียางฝากที่รอรับคืน 🎉</div>;
   return (
     <div className="card-grid">
@@ -2133,7 +2133,7 @@ function DepositScreen({ deposits, reload, toast, lockedBranch }){
         ))}
       </div>
       {stage==="new"    && <DepositForm onSaved={reload} toast={toast} lockedBranch={lockedBranch} />}
-      {stage==="pickup" && <PickupStage deposits={deposits} reload={reload} toast={toast} />}
+      {stage==="pickup" && <PickupStage deposits={deposits} reload={reload} toast={toast} lockedBranch={lockedBranch} />}
       {stage==="all"    && <DepositList deposits={deposits} reload={reload} toast={toast} lockedBranch={lockedBranch} />}
     </div>
   );
@@ -2163,17 +2163,34 @@ function App(){
     setDeposits(data || []);
   }, [toast]);
 
+  // 🔇 Sync เบื้องหลัง — ไม่ตั้ง loading = true เพื่อป้องกันหน้าจอกระพริบ/ฟอร์มล้างตัวเอง
+  const silentSync = useCallback(async ()=>{
+    if (!supa) return;
+    const [r1, r2] = await Promise.all([
+      supa.from(TABLE).select("*").order("record_date",{ascending:false}).order("created_at",{ascending:false}),
+      supa.from(DEPOSIT_TABLE).select("*").order("deposit_date",{ascending:false}).order("created_at",{ascending:false})
+    ]);
+    if (r1.data) setLots(r1.data);
+    if (r2.data) setDeposits(r2.data);
+  }, []);
+
   useEffect(()=>{ reload(); reloadDeposits(); }, [reload, reloadDeposits]);
 
-  // 🔄 Realtime sync — อัปเดตอัตโนมัติเมื่อมีการเปลี่ยนแปลงข้อมูล จากเครื่อง/สาขาอื่น
+  // 🔄 Realtime sync — ใช้ silentSync แทน reload ป้องกันหน้าจอกระพริบตอนพิมพ์ข้อมูล
   useEffect(()=>{
     if (!supa) return;
+    let debounce = null;
+    // debounce 800ms กันกรณีมีหลาย event ยิงมาติดกัน (เช่น insert + update พร้อมกัน)
+    const onChanged = () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(silentSync, 800);
+    };
     const channel = supa.channel("tire-track-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tire_lots" }, () => { reload(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "tire_deposits" }, () => { reloadDeposits(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tire_lots" }, onChanged)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tire_deposits" }, onChanged)
       .subscribe();
-    return () => { supa.removeChannel(channel); };
-  }, [reload, reloadDeposits]);
+    return () => { clearTimeout(debounce); supa.removeChannel(channel); };
+  }, [silentSync]);
 
   const tabs = [
     { k:"work",     ic:"📝", l:"บันทึก" },
