@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#d32029" />
 <title>ระบบบันทึกยางเก่า ดี/เสีย - COCKPIT</title>
 <script>
-  // ระบบจับ error แสดงบนหน้าจอ (กันจอขาวแบบไม่รู้สาเหตุ)
+  // แสดง error เฉพาะกรณีแอปโหลดไม่ขึ้นเลย (จอขาว) — ไม่แสดง resource/network error ทั่วไป
   window.showFatalError = function(msg){
     function append(){
       var el = document.getElementById('fatal-error');
@@ -27,15 +27,8 @@
     if (document.body) append();
     else document.addEventListener('DOMContentLoaded', append);
   };
-  window.addEventListener('error', function(e){
-    // กรอง resource error (img/script โหลดไม่ขึ้น) ออก — แสดงเฉพาะ JS runtime error จริงๆ
-    if (e.target && e.target !== window && e.target.tagName) return;
-    if (!e.message || e.message === 'error' || e.message === 'Script error.') return;
-    window.showFatalError('JS Error: ' + (e.message || 'unknown'));
-  }, true);
-  window.addEventListener('unhandledrejection', function(e){
-    window.showFatalError('Promise Error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
-  });
+  // ไม่ดัก global error events อีกต่อไป — ป้องกัน false alarm จากรูปโหลดไม่ขึ้น/network errors
+  // แอปมี try/catch ครอบ ReactDOM.createRoot ไว้แล้ว และมีตัวตรวจสอบ 7 วินาทีด้านล่าง
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
