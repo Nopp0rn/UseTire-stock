@@ -221,25 +221,39 @@ const ACTIVE_DEPOSIT_STATUSES = ["deposited"];
 const HISTORY_DEPOSIT_STATUSES = ["picked_up","moved_to_stock"];
 const DEPOSIT_STATUS_LABEL = { deposited:"ฝากอยู่", picked_up:"รับคืนแล้ว", moved_to_stock:"ย้ายเข้าสต็อกแล้ว" };
 
+function getFileType(file){
+  if (file.type && file.type.startsWith("image/")) return file.type;
+  const ext = (file.name || "").split(".").pop().toLowerCase();
+  return { jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", gif:"image/gif",
+           webp:"image/webp", heic:"image/jpeg", heif:"image/jpeg" }[ext] || "image/jpeg";
+}
+
 function compressImage(file, maxDim = 1280, quality = 0.7) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height = Math.round(height*maxDim/width); width = maxDim; }
-        else if (height >= width && height > maxDim) { width = Math.round(width*maxDim/height); height = maxDim; }
-        const c = document.createElement("canvas");
-        c.width = width; c.height = height;
-        c.getContext("2d").drawImage(img, 0, 0, width, height);
-        c.toBlob(b => b ? resolve(b) : reject(new Error("compress fail")), "image/jpeg", quality);
+  // ไม่มีวัน reject — ถ้า compress ไม่สำเร็จ (Android/canvas issue) ให้ส่งต้นฉบับกลับ
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              let { width, height } = img;
+              if (width > height && width > maxDim){ height = Math.round(height*maxDim/width); width = maxDim; }
+              else if (height >= width && height > maxDim){ width = Math.round(width*maxDim/height); height = maxDim; }
+              const c = document.createElement("canvas");
+              c.width = width; c.height = height;
+              c.getContext("2d").drawImage(img, 0, 0, width, height);
+              c.toBlob(b => resolve(b || file), "image/jpeg", quality);
+            } catch(err){ console.warn("canvas compress failed — using original", err); resolve(file); }
+          };
+          img.onerror = () => { console.warn("image decode failed — using original"); resolve(file); };
+          img.src = e.target.result;
+        } catch(err){ resolve(file); }
       };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    } catch(err){ resolve(file); }
   });
 }
 
@@ -281,8 +295,9 @@ function IntakeForm({ onSaved, toast, defaultBranch, lockedBranch }){
       if (files.length){
         for (const file of files){
           const blob = await compressImage(file);
+          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
           const path = `${f.branch}/intake_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType });
           if (error) throw error;
           const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
           photos.push({ url: data.publicUrl, path });
@@ -530,8 +545,9 @@ function GoodDecisionModal({ lot, onClose, onDone, toast }){
       if (hasReject && files.length){
         for (const file of files){
           const blob = await compressImage(file);
+          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
           const path = `${lot.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType });
           if (error) throw error;
           const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
           photos.push({ url: data.publicUrl, path });
@@ -1510,8 +1526,9 @@ function DepositForm({ onSaved, toast, defaultBranch, lockedBranch }){
       let photos = [];
       for (const file of files){
         const blob = await compressImage(file);
+          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
         const path = `deposits/${f.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType });
         if (error) throw error;
         const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
         photos.push({ url: data.publicUrl, path });
@@ -1626,8 +1643,9 @@ function PickupModal({ deposit, onClose, onDone, toast }){
       let photos = [];
       for (const file of files){
         const blob = await compressImage(file);
+          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
         const path = `deposits/${deposit.branch}/pickup_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:"image/jpeg" });
+        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType });
         if (error) throw error;
         const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
         photos.push({ url: data.publicUrl, path });
