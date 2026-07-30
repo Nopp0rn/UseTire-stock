@@ -186,7 +186,7 @@ const BUCKET = "tire-photos";
 
 // ── เวอร์ชันแอป ──
 // แก้เลขนี้ทุกครั้งที่ปล่อยของใหม่ แล้วหน้าจอที่เปิดค้างจะรู้เองว่ามีของใหม่ (ดู checkVersion ด้านล่าง)
-const APP_VERSION = "v1.0-20260729";
+const APP_VERSION = "v1.1-20260729";
 
 // ปุ่มอัปเดตสำหรับคนที่ล้าง cache เองไม่เป็น — แตะที่ป้ายเวอร์ชันแล้วเรียกฟังก์ชันนี้
 // ล้าง cache ทุกชั้นที่ล้างได้ แล้วโหลดหน้าใหม่แบบข้าม cache
@@ -203,27 +203,51 @@ async function forceUpdate() {
   location.replace(location.href.split("?")[0] + "?_u=" + Date.now());
 }
 
-// ── ลด Egress: ใช้ "รูปย่อ" ในหน้ารายการ แทนการโหลดรูปเต็มทุกใบ ──
-//   รูปเต็มเฉลี่ย ~140KB แต่ช่องรูปย่อในหน้าจอกว้างแค่ ~100px
-//   จึงขอให้ Supabase ย่อรูปให้ก่อนส่ง (เหลือระดับ 5-10KB) ประหยัดได้ราว 90%
-//   ถ้าโปรเจกต์ไม่รองรับการย่อรูป onError จะสลับกลับไปใช้รูปเต็มอัตโนมัติ (ดู <Thumb/>)
-function thumbUrl(url, w = 200) {
-  try {
-    if (!url || !url.includes("/storage/v1/object/public/")) return url;
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/")
-           + (url.includes("?") ? "&" : "?") + "width=" + w + "&quality=60";
-  } catch { return url; }
+// ── ลด Egress: เก็บ "รูปย่อ" เป็นไฟล์แยกตั้งแต่ตอนอัปโหลด ──
+//   หน้ารายการโหลดรูปย่อ (~8KB) แทนรูปเต็ม (~140KB) ประหยัดได้ราว 90%
+//   ไม่ใช้ระบบย่อรูปอัตโนมัติของ Supabase (มีเฉพาะแพ็กเกจ Pro และคิดเงินเกิน 100 รูป/เดือน)
+//   วิธีนี้ไม่มีค่าใช้จ่ายต่อเนื่อง และใช้ได้ทั้งแพ็กเกจฟรีและ Pro
+//   รูปเก่าที่อัปก่อนหน้านี้ไม่มีไฟล์ย่อ — จะโหลดรูปเต็มตามเดิม (ยังแสดงผลได้ปกติ)
+
+// เส้นทางของไฟล์ย่อ: แทรก thumb_ หน้าชื่อไฟล์  เช่น 012/intake_1.jpg -> 012/thumb_intake_1.jpg
+function thumbPathOf(path) {
+  const i = path.lastIndexOf("/");
+  return i < 0 ? "thumb_" + path : path.slice(0, i + 1) + "thumb_" + path.slice(i + 1);
 }
 
-// รูปย่อที่ปลอดภัย: ถ้าย่อไม่ได้ให้ถอยไปใช้รูปเต็ม, โหลดแบบ lazy (เห็นค่อยโหลด)
-function Thumb({ src, onClick }) {
-  const [cur, setCur] = React.useState(thumbUrl(src));
+// อัปโหลดรูป 1 ใบ: เก็บทั้งไฟล์เต็มและไฟล์ย่อ
+// คืนค่า { url, path, thumb, thumbPath } — ถ้าอัปไฟล์ย่อไม่สำเร็จก็ยังใช้งานได้ (แค่ไม่มีตัวย่อ)
+async function uploadPhoto(supa, file, path) {
+  const full = await compressImage(file);                       // 1280px q0.7 (ของเดิม)
+  const fullType = full instanceof File ? getFileType(full) : "image/jpeg";
+  const up = await supa.storage.from(BUCKET).upload(path, full, { contentType: fullType, cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const rec = { url: supa.storage.from(BUCKET).getPublicUrl(path).data.publicUrl, path };
+
+  try {
+    const small = await compressImage(file, 320, 0.6);           // รูปย่อสำหรับหน้ารายการ
+    const tPath = thumbPathOf(path);
+    const tUp = await supa.storage.from(BUCKET)
+      .upload(tPath, small, { contentType: "image/jpeg", cacheControl: '31536000' });
+    if (!tUp.error) {
+      rec.thumb = supa.storage.from(BUCKET).getPublicUrl(tPath).data.publicUrl;
+      rec.thumbPath = tPath;
+    }
+  } catch (e) { /* ย่อไม่สำเร็จ — ใช้รูปเต็มแทน ไม่ถือว่าพัง */ }
+  return rec;
+}
+
+// แสดงรูปย่อถ้ามี ถ้าไม่มี (รูปเก่า) หรือโหลดไม่ขึ้น ให้ถอยไปใช้รูปเต็ม
+function Thumb({ p, onClick }) {
+  const first = p.thumb || p.url;
+  const [cur, setCur] = React.useState(first);
   const [fell, setFell] = React.useState(false);
+  React.useEffect(() => { setCur(p.thumb || p.url); setFell(false); }, [p.thumb, p.url]);
   return React.createElement("img", {
     src: cur, alt: "", loading: "lazy", decoding: "async",
     onClick: onClick,
     onError: (e) => {
-      if (!fell) { setFell(true); setCur(src); }               // ลองรูปเต็ม
+      if (!fell && p.thumb && cur !== p.url) { setFell(true); setCur(p.url); }
       else { e.target.style.opacity = "0.3"; e.target.title = "โหลดรูปไม่สำเร็จ"; }
     }
   });
@@ -339,13 +363,8 @@ function IntakeForm({ onSaved, toast, defaultBranch, lockedBranch }){
       let photos = [];
       if (files.length){
         for (const file of files){
-          const blob = await compressImage(file);
-          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
           const path = `${f.branch}/intake_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType, cacheControl:'31536000' });
-          if (error) throw error;
-          const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
-          photos.push({ url: data.publicUrl, path });
+          photos.push(await uploadPhoto(supa, file, path));   // อัปทั้งรูปเต็มและรูปย่อ
         }
       }
       const row = {
@@ -589,13 +608,8 @@ function GoodDecisionModal({ lot, onClose, onDone, toast }){
       let photos = [];
       if (hasReject && files.length){
         for (const file of files){
-          const blob = await compressImage(file);
-          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
           const path = `${lot.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-          const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType, cacheControl:'31536000' });
-          if (error) throw error;
-          const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
-          photos.push({ url: data.publicUrl, path });
+          photos.push(await uploadPhoto(supa, file, path));   // อัปทั้งรูปเต็มและรูปย่อ
         }
       }
       const newSoldGood = n(lot.qty_sold_good) + acceptNow;
@@ -1163,7 +1177,8 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
     if (!confirm(`ลบข้อมูลทั้งหมดของ ${monthThai(mk)} จำนวน ${count} รายการ?\n(ลบรูปถ่ายในเดือนนี้ด้วย — กู้คืนไม่ได้)`)) return;
     try {
       const recs = lots.filter(l=>l.month_key===mk);
-      const paths = recs.flatMap(l => [...(l.reject_photos||[]), ...(l.intake_photos||[])].map(p=>p.path)).filter(Boolean);
+      const paths = recs.flatMap(l => [...(l.reject_photos||[]), ...(l.intake_photos||[])]
+        .flatMap(p=>[p.path, p.thumbPath])).filter(Boolean);   // ลบทั้งรูปเต็มและรูปย่อ
       if (paths.length) await supa.storage.from(BUCKET).remove(paths);
       const { error } = await supa.from(TABLE).delete().eq("month_key", mk);
       if (error) throw error;
@@ -1176,7 +1191,8 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
     if (!supa) return;
     if (!confirm(`ลบรายการ ${lot.tire_size} (สาขา ${lot.branch}) นี้?\n(ลบรูปถ่ายที่ติดมาด้วย — กู้คืนไม่ได้)`)) return;
     try {
-      const paths = [...(lot.reject_photos||[]), ...(lot.intake_photos||[])].map(p=>p.path).filter(Boolean);
+      const paths = [...(lot.reject_photos||[]), ...(lot.intake_photos||[])]
+        .flatMap(p=>[p.path, p.thumbPath]).filter(Boolean);   // ลบทั้งรูปเต็มและรูปย่อ
       if (paths.length) await supa.storage.from(BUCKET).remove(paths);
       const { error } = await supa.from(TABLE).delete().eq("id", lot.id);
       if (error) throw error;
@@ -1282,14 +1298,14 @@ function RecordsList({ lots, reload, toast, deposits, reloadDeposits, lockedBran
                 <>
                   <div className="small" style={{marginTop:8}}>📷 รูปตอนรับเข้า</div>
                   <div className="thumbs">
-                    {l.intake_photos.map((p,i)=>(<Thumb key={i} src={p.url} onClick={()=>setLightbox(p.url)} />))}
+                    {l.intake_photos.map((p,i)=>(<Thumb key={i} p={p} onClick={()=>setLightbox(p.url)} />))}
                   </div>
                 </>
               )}
               {l.reject_note && <div className="note">หมายเหตุ: {l.reject_note}</div>}
               {(l.reject_photos||[]).length>0 && (
                 <div className="thumbs">
-                  {l.reject_photos.map((p,i)=>(<Thumb key={i} src={p.url} onClick={()=>setLightbox(p.url)} />))}
+                  {l.reject_photos.map((p,i)=>(<Thumb key={i} p={p} onClick={()=>setLightbox(p.url)} />))}
                 </div>
               )}
             </div>
@@ -1570,13 +1586,8 @@ function DepositForm({ onSaved, toast, defaultBranch, lockedBranch }){
     try {
       let photos = [];
       for (const file of files){
-        const blob = await compressImage(file);
-          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
         const path = `deposits/${f.branch}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType, cacheControl:'31536000' });
-        if (error) throw error;
-        const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
-        photos.push({ url: data.publicUrl, path });
+        photos.push(await uploadPhoto(supa, file, path));   // อัปทั้งรูปเต็มและรูปย่อ
       }
       const row = {
         branch: f.branch,
@@ -1687,13 +1698,8 @@ function PickupModal({ deposit, onClose, onDone, toast }){
     try {
       let photos = [];
       for (const file of files){
-        const blob = await compressImage(file);
-          const fileType = blob instanceof File ? getFileType(blob) : "image/jpeg";
         const path = `deposits/${deposit.branch}/pickup_${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;
-        const { error } = await supa.storage.from(BUCKET).upload(path, blob, { contentType:fileType, cacheControl:'31536000' });
-        if (error) throw error;
-        const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
-        photos.push({ url: data.publicUrl, path });
+        photos.push(await uploadPhoto(supa, file, path));   // อัปทั้งรูปเต็มและรูปย่อ
       }
       const { error } = await supa.from(DEPOSIT_TABLE).update({
         status: "picked_up",
@@ -1868,7 +1874,7 @@ function PickupStage({ deposits, reload, toast, lockedBranch }){
           </div>
           <div className="qty">{fmt(d.qty)} เส้น</div>
           {(d.deposit_photos||[]).length>0 && (
-            <div className="thumbs">{d.deposit_photos.map((p,i)=>(<Thumb key={i} src={p.url} />))}</div>
+            <div className="thumbs">{d.deposit_photos.map((p,i)=>(<Thumb key={i} p={p} />))}</div>
           )}
           <div className="actions" style={{marginTop:10}}>
             <button className="btn" onClick={()=>setActive(d)}>✅ บันทึกตอนมารับ</button>
@@ -2043,7 +2049,8 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
     if (!confirm(`ลบข้อมูลการฝากยางทั้งหมดของ ${monthThai(mk)} จำนวน ${count} รายการ?\n(ลบรูปถ่ายในเดือนนี้ด้วย — กู้คืนไม่ได้)`)) return;
     try {
       const recs = deposits.filter(d=>d.month_key===mk);
-      const paths = recs.flatMap(d => [...(d.deposit_photos||[]), ...(d.pickup_photos||[])].map(p=>p.path)).filter(Boolean);
+      const paths = recs.flatMap(d => [...(d.deposit_photos||[]), ...(d.pickup_photos||[])]
+        .flatMap(p=>[p.path, p.thumbPath])).filter(Boolean);   // ลบทั้งรูปเต็มและรูปย่อ
       if (paths.length) await supa.storage.from(BUCKET).remove(paths);
       const { error } = await supa.from(DEPOSIT_TABLE).delete().eq("month_key", mk);
       if (error) throw error;
@@ -2056,7 +2063,8 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
     if (!supa) return;
     if (!confirm(`ลบรายการฝากของ ${d.customer_name} (สาขา ${d.branch}) นี้?\n(ลบรูปถ่ายที่ติดมาด้วย — กู้คืนไม่ได้)`)) return;
     try {
-      const paths = [...(d.deposit_photos||[]), ...(d.pickup_photos||[])].map(p=>p.path).filter(Boolean);
+      const paths = [...(d.deposit_photos||[]), ...(d.pickup_photos||[])]
+        .flatMap(p=>[p.path, p.thumbPath]).filter(Boolean);   // ลบทั้งรูปเต็มและรูปย่อ
       if (paths.length) await supa.storage.from(BUCKET).remove(paths);
       const { error } = await supa.from(DEPOSIT_TABLE).delete().eq("id", d.id);
       if (error) throw error;
@@ -2146,13 +2154,13 @@ function DepositList({ deposits, reload, toast, lockedBranch }){
             {(d.deposit_photos||[]).length>0 && (
               <>
                 <div className="small" style={{marginTop:8}}>📷 รูปตอนฝาก</div>
-                <div className="thumbs">{d.deposit_photos.map((p,i)=>(<Thumb key={i} src={p.url} onClick={()=>setLightbox(p.url)} />))}</div>
+                <div className="thumbs">{d.deposit_photos.map((p,i)=>(<Thumb key={i} p={p} onClick={()=>setLightbox(p.url)} />))}</div>
               </>
             )}
             {(d.pickup_photos||[]).length>0 && (
               <>
                 <div className="small" style={{marginTop:8}}>📷 รูปตอนมารับ</div>
-                <div className="thumbs">{d.pickup_photos.map((p,i)=>(<Thumb key={i} src={p.url} onClick={()=>setLightbox(p.url)} />))}</div>
+                <div className="thumbs">{d.pickup_photos.map((p,i)=>(<Thumb key={i} p={p} onClick={()=>setLightbox(p.url)} />))}</div>
               </>
             )}
           </div>
