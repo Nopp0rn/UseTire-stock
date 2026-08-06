@@ -186,7 +186,7 @@ const BUCKET = "tire-photos";
 
 // ── เวอร์ชันแอป ──
 // แก้เลขนี้ทุกครั้งที่ปล่อยของใหม่ แล้วหน้าจอที่เปิดค้างจะรู้เองว่ามีของใหม่ (ดู checkVersion ด้านล่าง)
-const APP_VERSION = "v1.1-20260729";
+const APP_VERSION = "v1.2-20260806";
 
 // ปุ่มอัปเดตสำหรับคนที่ล้าง cache เองไม่เป็น — แตะที่ป้ายเวอร์ชันแล้วเรียกฟังก์ชันนี้
 // ล้าง cache ทุกชั้นที่ล้างได้ แล้วโหลดหน้าใหม่แบบข้าม cache
@@ -219,6 +219,13 @@ function thumbPathOf(path) {
 // คืนค่า { url, path, thumb, thumbPath } — ถ้าอัปไฟล์ย่อไม่สำเร็จก็ยังใช้งานได้ (แค่ไม่มีตัวย่อ)
 async function uploadPhoto(supa, file, path) {
   const full = await compressImage(file);                       // 1280px q0.7 (ของเดิม)
+  // compressImage คืน null เมื่อย่อไม่ได้และไฟล์ใหญ่เกินเพดาน — กันไม่ให้รูปดิบขนาดใหญ่ขึ้นระบบ
+  if (!full) {
+    throw new Error(
+      `รูปนี้ใหญ่เกินไป (${(file.size/1024/1024).toFixed(1)} MB) และย่อไม่สำเร็จ\n` +
+      `กรุณาถ่ายใหม่ หรือลดความละเอียดกล้องลง`
+    );
+  }
   const fullType = full instanceof File ? getFileType(full) : "image/jpeg";
   const up = await supa.storage.from(BUCKET).upload(path, full, { contentType: fullType, cacheControl: '31536000' });
   if (up.error) throw up.error;
@@ -226,12 +233,14 @@ async function uploadPhoto(supa, file, path) {
 
   try {
     const small = await compressImage(file, 320, 0.6);           // รูปย่อสำหรับหน้ารายการ
-    const tPath = thumbPathOf(path);
-    const tUp = await supa.storage.from(BUCKET)
-      .upload(tPath, small, { contentType: "image/jpeg", cacheControl: '31536000' });
-    if (!tUp.error) {
-      rec.thumb = supa.storage.from(BUCKET).getPublicUrl(tPath).data.publicUrl;
-      rec.thumbPath = tPath;
+    if (small) {
+      const tPath = thumbPathOf(path);
+      const tUp = await supa.storage.from(BUCKET)
+        .upload(tPath, small, { contentType: "image/jpeg", cacheControl: '31536000' });
+      if (!tUp.error) {
+        rec.thumb = supa.storage.from(BUCKET).getPublicUrl(tPath).data.publicUrl;
+        rec.thumbPath = tPath;
+      }
     }
   } catch (e) { /* ย่อไม่สำเร็จ — ใช้รูปเต็มแทน ไม่ถือว่าพัง */ }
   return rec;
@@ -297,33 +306,83 @@ function getFileType(file){
            webp:"image/webp", heic:"image/jpeg", heif:"image/jpeg" }[ext] || "image/jpeg";
 }
 
-function compressImage(file, maxDim = 1280, quality = 0.7) {
-  // ไม่มีวัน reject — ถ้า compress ไม่สำเร็จ (Android/canvas issue) ให้ส่งต้นฉบับกลับ
-  return new Promise((resolve) => {
+/* ---------- บีบอัดรูป ----------
+   2026-08-06: เดิมถ้าบีบอัดไม่สำเร็จจะส่ง "ไฟล์ต้นฉบับ" กลับไปเลย
+     ทำให้บางเครื่องอัปรูปดิบขนาด 3-4 MB ขึ้นระบบ (พบ 26 ใบ รวม 73 MB)
+     สาเหตุหลัก: อ่านรูปใหญ่เป็น data URL (base64) กินหน่วยความจำมาก
+     บนมือถือบางรุ่นจะ decode ไม่ผ่าน
+   แก้ 3 ชั้น โดยไม่ต้องแตะเครื่องที่สาขา:
+     1) ใช้ createImageBitmap อ่านไฟล์ตรงๆ ไม่ผ่าน base64 (ประหยัดหน่วยความจำกว่ามาก
+        และหมุนรูปตาม EXIF ให้ถูกต้องด้วย)
+     2) ถ้าไม่ได้ ค่อยถอยไปวิธีเดิม
+     3) ถ้าผลลัพธ์ยังใหญ่เกินกำหนด บีบซ้ำด้วยขนาด/คุณภาพที่ต่ำลง */
+const MAX_UPLOAD_BYTES = 900 * 1024;   // เพดานต่อรูป ~0.9 MB
+
+function drawToBlob(src, w, h, quality) {
+  return new Promise(resolve => {
+    try {
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(src, 0, 0, w, h);
+      c.toBlob(b => resolve(b || null), "image/jpeg", quality);
+    } catch (err) { console.warn("canvas draw failed", err); resolve(null); }
+  });
+}
+
+function fitSize(width, height, maxDim) {
+  if (width > height && width > maxDim) return [maxDim, Math.round(height * maxDim / width)];
+  if (height >= width && height > maxDim) return [Math.round(width * maxDim / height), maxDim];
+  return [width, height];
+}
+
+// อ่านรูปด้วยวิธีที่ประหยัดหน่วยความจำก่อน ถ้าไม่ได้ค่อยใช้วิธีเดิม
+async function decodeImage(file) {
+  if (typeof createImageBitmap === "function") {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+    catch (e) { try { return await createImageBitmap(file); } catch (e2) {} }
+  }
+  return await new Promise(resolve => {
     try {
       const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const img = new Image();
-          img.onload = () => {
-            try {
-              let { width, height } = img;
-              if (width > height && width > maxDim){ height = Math.round(height*maxDim/width); width = maxDim; }
-              else if (height >= width && height > maxDim){ width = Math.round(width*maxDim/height); height = maxDim; }
-              const c = document.createElement("canvas");
-              c.width = width; c.height = height;
-              c.getContext("2d").drawImage(img, 0, 0, width, height);
-              c.toBlob(b => resolve(b || file), "image/jpeg", quality);
-            } catch(err){ console.warn("canvas compress failed — using original", err); resolve(file); }
-          };
-          img.onerror = () => { console.warn("image decode failed — using original"); resolve(file); };
-          img.src = e.target.result;
-        } catch(err){ resolve(file); }
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = ev.target.result;
       };
-      reader.onerror = () => resolve(file);
+      reader.onerror = () => resolve(null);
       reader.readAsDataURL(file);
-    } catch(err){ resolve(file); }
+    } catch { resolve(null); }
   });
+}
+
+async function compressImage(file, maxDim = 1280, quality = 0.7) {
+  try {
+    const src = await decodeImage(file);
+    if (!src) {
+      console.warn("[compressImage] decode ไม่สำเร็จ");
+      return file.size <= MAX_UPLOAD_BYTES ? file : null;   // ใหญ่เกินไป → ไม่ปล่อยขึ้นระบบ
+    }
+    const w0 = src.width || src.naturalWidth, h0 = src.height || src.naturalHeight;
+
+    // ไล่บีบจนกว่าจะได้ขนาดที่รับได้
+    const steps = [[maxDim, quality], [1024, 0.62], [800, 0.55], [640, 0.5]];
+    let best = null;
+    for (const [dim, q] of steps) {
+      const [w, h] = fitSize(w0, h0, dim);
+      const b = await drawToBlob(src, w, h, q);
+      if (b) { best = b; if (b.size <= MAX_UPLOAD_BYTES) break; }
+    }
+    try { src.close && src.close(); } catch {}
+
+    if (!best) return file.size <= MAX_UPLOAD_BYTES ? file : null;
+    // ถ้าบีบแล้วยังใหญ่กว่าต้นฉบับ ให้ใช้ต้นฉบับ (เกิดได้กับรูปเล็กมาก)
+    return best.size < file.size ? best : file;
+  } catch (err) {
+    console.warn("[compressImage] ผิดพลาด:", err);
+    return file.size <= MAX_UPLOAD_BYTES ? file : null;
+  }
 }
 
 /* ---------- Toast ---------- */
